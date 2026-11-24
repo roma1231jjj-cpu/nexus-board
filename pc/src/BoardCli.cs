@@ -497,12 +497,13 @@ namespace NexusBoard.Cli
             }
         }
 
-        static int ChatListCmd(bool json)
+        static int ChatListCmd(bool json, string board)
         {
             var s = ChatSettings();
-            if (string.IsNullOrEmpty(s.Board)) { Out("ERR нет ключа доски: открой приложение → Ключ"); return 2; }
+            string target = string.IsNullOrEmpty(board) ? s.Board : board.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(target)) { Out("ERR нет ключа доски: открой приложение → Ключ"); return 2; }
             string raw;
-            try { raw = HttpJson(ChatBase(s) + "/api/c/list?board=" + s.Board + "&since=0&limit=50", null); }
+            try { raw = HttpJson(ChatBase(s) + "/api/c/list?board=" + target + "&since=0&limit=50", null); }
             catch (Exception e) { Out("ERR " + e.Message); return 1; }
             if (json) { Out(raw); return 0; }
             var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
@@ -522,13 +523,14 @@ namespace NexusBoard.Cli
             return 0;
         }
 
-        static int ChatSayCmd(string text)
+        static int ChatSayCmd(string text, string board)
         {
             text = (text ?? "").Trim();
             if (text.Length == 0) { Out("ERR пустой текст"); return 2; }
             var s = ChatSettings();
-            if (string.IsNullOrEmpty(s.Board)) { Out("ERR нет ключа доски"); return 2; }
-            var payload = new Dictionary<string, object> { { "board", s.Board }, { "from", "ai" }, { "text", text } };
+            string target = string.IsNullOrEmpty(board) ? s.Board : board.Trim().ToLowerInvariant();
+            if (string.IsNullOrEmpty(target)) { Out("ERR нет ключа доски"); return 2; }
+            var payload = new Dictionary<string, object> { { "board", target }, { "from", "ai" }, { "text", text } };
             try
             {
                 string raw = HttpJson(ChatBase(s) + "/api/c/send", new JavaScriptSerializer().Serialize(payload));
@@ -553,13 +555,13 @@ namespace NexusBoard.Cli
             {
                 case "chat-list":
                 case "chat":
-                    return ChatListCmd(d.ContainsKey("json"));
+                    return ChatListCmd(d.ContainsKey("json"), Get(d, "board"));
 
                 case "chat-say":
                     {
                         string text = Get(d, "chat-say");
                         if (string.IsNullOrWhiteSpace(text)) text = Get(d, "_positional").Replace("", " ");
-                        return ChatSayCmd(text);
+                        return ChatSayCmd(text, Get(d, "board"));
                     }
 
                 case "help":
@@ -824,6 +826,7 @@ namespace NexusBoard.Cli
                 "  --lang ru|en      язык интерфейса",
                 "  --chat-list [--json]   переписка с владельцем",
                 "  --chat-say \"текст\"     ответить владельцу в чат",
+                "  --board <16 hex>  к какой доске (по умолчанию — своя)",
                 "  --path            путь к tasks.json",
                 "  --help",
                 "",
