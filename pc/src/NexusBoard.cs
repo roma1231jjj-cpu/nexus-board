@@ -21,7 +21,8 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.0.1";
+        public const string Version = "2.0.3";
+        public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
@@ -124,12 +125,55 @@ namespace NexusBoard
             Application.SetCompatibleTextRenderingDefault(false);
 
             string shot = null, shotTheme = null, shotLang = null, shotView = null;
+            bool openKey = args.Length > 0 && args[0] == "--open-key";
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--shot" && i + 1 < args.Length) shot = args[++i];
                 else if (args[i] == "--theme" && i + 1 < args.Length) shotTheme = args[++i];
                 else if (args[i] == "--lang" && i + 1 < args.Length) shotLang = args[++i];
                 else if (args[i] == "--view" && i + 1 < args.Length) shotView = args[++i];
+            }
+            OpenKeyOnStart = openKey;
+            string shotKey = null;
+            for (int i = 0; i < args.Length - 1; i++) if (args[i] == "--shotkey") shotKey = args[i + 1];
+            if (shotKey != null)
+            {
+                string thName = "midnight";
+                for (int i = 0; i < args.Length - 1; i++) if (args[i] == "--theme") thName = args[i + 1];
+                L.Lang = Array.IndexOf(args, "en") >= 0 ? "en" : "ru";
+                var dlg = new KeyDialog(Theme.Get(thName), "7140a973cfe1946d");
+                dlg.Shown += (s2, e2) =>
+                {
+                    var tmr = new System.Windows.Forms.Timer { Interval = 900 };
+                    tmr.Tick += (s3, e3) =>
+                    {
+                        tmr.Stop();
+                        try
+                        {
+                            var r = dlg.Bounds;
+                            using (var bmp = new Bitmap(r.Width, r.Height))
+                            {
+                                using (var g = Graphics.FromImage(bmp))
+                                {
+                                    IntPtr hdc = g.GetHdc();
+                                    bool ok = PrintWindow(dlg.Handle, hdc, 2);
+                                    g.ReleaseHdc(hdc);
+                                    if (!ok)
+                                    {
+                                        g.ReleaseHdc(hdc);
+                                    }
+                                }
+                                bmp.Save(shotKey, System.Drawing.Imaging.ImageFormat.Png);
+                            }
+                            System.IO.File.WriteAllText(shotKey + ".ok", "ok");
+                        }
+                        catch (Exception ex) { try { System.IO.File.WriteAllText(shotKey + ".err", ex.Message); } catch { } }
+                        dlg.Close();
+                    };
+                    tmr.Start();
+                };
+                Application.Run(dlg);
+                return;
             }
             if (shot != null)
             {
@@ -586,6 +630,12 @@ namespace NexusBoard
                 ApplyTheme();
                 if (string.IsNullOrEmpty(boardId)) CreateBoard(); else LoadBoard();
                 CheckUpdate();
+                if (Program.OpenKeyOnStart)
+                {
+                    var t2 = new System.Windows.Forms.Timer { Interval = 1200 };
+                    t2.Tick += (s2, e2) => { t2.Stop(); ShowConnect(); };
+                    t2.Start();
+                }
             };
 
             KeyDown += (s, e) =>
@@ -1572,12 +1622,25 @@ namespace NexusBoard
 
         void ShowConnect()
         {
-            string body = L.T("connect_body") + Environment.NewLine + Environment.NewLine + (boardId.Length == 0 ? "—" : boardId);
-            var r = MessageBox.Show(this, body, L.T("connect"), MessageBoxButtons.OKCancel);
-            if (r == DialogResult.OK && boardId.Length > 0)
+            using (var dlg = new KeyDialog(th, boardId))
             {
-                try { Clipboard.SetText(boardId); } catch { }
-                lblSub.Text = L.T("copied");
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                string key = dlg.Key;
+                if (key.Length != 16)
+                {
+                    MessageBox.Show(this, L.Lang == "en"
+                        ? "A board key is 16 characters: 0-9, a-f."
+                        : "Ключ доски — 16 символов: 0-9, a-f.", "Nexus Board");
+                    return;
+                }
+                settings.Board = key;
+                settings.Save();
+                boardId = key;
+                tasks.Clear();
+                sections.Clear();
+                activeSection = "";
+                Render();
+                LoadBoard();
             }
         }
 
@@ -1911,6 +1974,100 @@ namespace NexusBoard
             {
                 MessageBox.Show(this, ex.Message, L.T("err"));
             }
+        }
+    }
+
+    class KeyDialog : Form
+    {
+        public string Key = "";
+        readonly Theme th;
+
+        public KeyDialog(Theme theme, string current)
+        {
+            th = theme;
+            Text = L.Lang == "en" ? "Board key" : "Ключ доски";
+            Width = 560;
+            Height = 268;
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            BackColor = th.Back;
+            ForeColor = th.Text;
+            Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular);
+
+            Controls.Add(new Label
+            {
+                Text = L.Lang == "en"
+                    ? "Paste the key from another device — phone or PC. Both ways work: the phone can join the PC board and the PC can join the phone board."
+                    : "Вставь ключ с другого устройства — телефона или ПК. Работает в обе стороны: телефон подключается к доске ПК, ПК — к доске телефона.",
+                Location = new Point(20, 18),
+                Size = new Size(500, 62),
+                ForeColor = th.Dim
+            });
+
+            var box = new TextBox
+            {
+                Location = new Point(20, 88),
+                Width = 380,
+                Text = current ?? "",
+                BackColor = th.Card,
+                ForeColor = th.Text,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = FontCache.Get("Segoe UI", 12f, FontStyle.Regular)
+            };
+            Controls.Add(box);
+
+            var paste = new FlatButton { Text = L.Lang == "en" ? "Paste" : "Вставить", Location = new Point(410, 86), Size = new Size(110, 30), BackColor = th.Card, ForeColor = th.Text };
+            paste.Click += (s, e) =>
+            {
+                try
+                {
+                    string clip = Clipboard.GetText();
+                    if (!string.IsNullOrEmpty(clip)) box.Text = Normalize(clip);
+                }
+                catch { }
+            };
+            Controls.Add(paste);
+
+            var copy = new FlatButton { Text = L.Lang == "en" ? "Copy" : "Копировать", Location = new Point(20, 132), Size = new Size(150, 30), BackColor = th.Card, ForeColor = th.Text };
+            copy.Click += (s, e) => { try { Clipboard.SetText(box.Text.Trim()); } catch { } };
+            Controls.Add(copy);
+
+            var hint = new Label
+            {
+                Text = L.Lang == "en" ? "16 characters: 0-9, a-f" : "16 символов: 0-9, a-f",
+                Location = new Point(184, 138),
+                AutoSize = true,
+                ForeColor = th.Dim
+            };
+            Controls.Add(hint);
+
+            var ok = new FlatButton { Text = L.Lang == "en" ? "Connect" : "Подключить", Location = new Point(300, 176), Size = new Size(140, 34), BackColor = th.Accent, ForeColor = th.AccentText };
+            ok.Click += (s, e) => { Key = Normalize(box.Text); DialogResult = DialogResult.OK; Close(); };
+            Controls.Add(ok);
+
+            var cancel = new FlatButton { Text = L.Lang == "en" ? "Cancel" : "Отмена", Location = new Point(450, 176), Size = new Size(90, 34), BackColor = th.Card, ForeColor = th.Text };
+            cancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cancel);
+
+            AcceptButton = null;
+            box.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { Key = Normalize(box.Text); DialogResult = DialogResult.OK; Close(); } };
+        }
+
+        static string Normalize(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            string v = raw.Trim().ToLowerInvariant();
+            int at = v.IndexOf("k=", StringComparison.Ordinal);
+            if (at >= 0) v = v.Substring(at + 2);
+            var sb = new StringBuilder();
+            foreach (char c in v)
+            {
+                if (sb.Length >= 16) break;
+                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sb.Append(c);
+            }
+            return sb.ToString();
         }
     }
 

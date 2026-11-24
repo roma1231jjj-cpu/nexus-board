@@ -29,7 +29,6 @@
     <string name="key_hint">key from the link</string>
     <string name="key_ok">Open</string>
     <string name="key_cancel">Cancel</string>
-    <string name="key_bad">Wrong key</string>
     <string name="key_need">Enter your access key</string>
     <string name="net_error">No connection to the server</string>
     <string name="update_available">Update %1$s available</string>
@@ -40,7 +39,12 @@
     <string name="connect">Connection</string>
     <string name="connect_title">How to connect the board</string>
     <string name="connect_body">1. This is your personal board. Its key is below.\n2. Paste the same key on the PC (menu ⋯ → Settings) or on the phone (long-press the title) — both devices show one board.\n3. Your AI fills it with POST /api/b/add?b=KEY (title, note, status, progress). Tabs: POST /api/b/section/add?b=KEY.\n4. Data travels through the website, so it works on any network, not only at home.</string>
-    <string name="copy_key">Copy key</string>
+    <string name="copy_key">Copy</string>
+    <string name="paste_key">Paste from clipboard</string>
+    <string name="apply_key">Connect</string>
+    <string name="connect_hint">A board key is 16 characters. Paste the key from another device so both show the same board. Works both ways: phone to PC and PC to phone.</string>
+    <string name="key_bad">A key must be 16 characters (0-9, a-f)</string>
+    <string name="key_empty_clip">Clipboard is empty</string>
     <string name="key_copied">Key copied</string>
     <string name="refresh_every">refreshes every 10 s</string>
     <string name="close">Close</string>

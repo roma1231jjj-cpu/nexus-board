@@ -29,7 +29,6 @@
     <string name="key_hint">ключ из ссылки</string>
     <string name="key_ok">Открыть</string>
     <string name="key_cancel">Отмена</string>
-    <string name="key_bad">Ключ не подошёл</string>
     <string name="key_need">Введи ключ доступа</string>
     <string name="net_error">Нет связи с сервером</string>
     <string name="update_available">Доступно обновление %1$s</string>
@@ -40,7 +39,12 @@
     <string name="connect">Подключение</string>
     <string name="connect_title">Как подключить доску</string>
     <string name="connect_body">1. Это ваша личная доска. Её ключ — ниже.\n2. Вставьте тот же ключ на компьютере (меню ⋯ → Настройки) или на телефоне (долгое нажатие по заголовку) — оба устройства покажут одну доску.\n3. Заполнять её может ваш ИИ: POST /api/b/add?b=КЛЮЧ с полями title, note, status, progress.\n4. Данные идут через сайт, поэтому работает в любой сети, а не только дома.</string>
-    <string name="copy_key">Скопировать ключ</string>
+    <string name="copy_key">Скопировать</string>
+    <string name="paste_key">Вставить из буфера</string>
+    <string name="apply_key">Подключить</string>
+    <string name="connect_hint">Ключ доски — 16 символов. Вставь ключ с другого устройства, чтобы оба показывали одну доску. Работает в обе стороны: телефон к ПК и ПК к телефону.</string>
+    <string name="key_bad">Нужен ключ из 16 символов (0-9, a-f)</string>
+    <string name="key_empty_clip">В буфере нет текста</string>
     <string name="key_copied">Ключ скопирован</string>
     <string name="refresh_every">обновляется каждые 10 с</string>
     <string name="close">Закрыть</string>

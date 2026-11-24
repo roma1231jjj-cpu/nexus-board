@@ -282,12 +282,40 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void openConnect() {
-        String key = prefs.boardId();
-        String body = getString(R.string.connect_body) + (char) 10 + (char) 10 + (key.isEmpty() ? "—" : key);
+        final float d = getResources().getDisplayMetrics().density;
+        final android.widget.EditText input = new android.widget.EditText(this);
+        input.setText(prefs.boardId());
+        input.setSingleLine(true);
+        input.setHint("0123456789abcdef");
+        input.setTextSize(16f);
+
+        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
+        box.setOrientation(android.widget.LinearLayout.VERTICAL);
+        box.setPadding((int) (20 * d), (int) (4 * d), (int) (20 * d), 0);
+        box.addView(input);
+
+        android.widget.Button paste = new android.widget.Button(this);
+        paste.setText(R.string.paste_key);
+        paste.setAllCaps(false);
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null || cm.getPrimaryClip().getItemCount() == 0) {
+                Toast.makeText(this, R.string.key_empty_clip, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            CharSequence raw = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
+            input.setText(cleanKey(String.valueOf(raw)));
+            input.setSelection(input.getText().length());
+        });
+        box.addView(paste);
+
         new AlertDialog.Builder(this)
                 .setTitle(R.string.connect_title)
-                .setMessage(body)
-                .setPositiveButton(R.string.copy_key, (d, w) -> {
+                .setMessage(R.string.connect_hint)
+                .setView(box)
+                .setPositiveButton(R.string.apply_key, (dd, w) -> applyKey(input.getText().toString()))
+                .setNeutralButton(R.string.copy_key, (dd, w) -> {
+                    String key = prefs.boardId();
                     if (key.isEmpty()) return;
                     android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Nexus Board key", key));
@@ -295,6 +323,33 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(R.string.close, null)
                 .show();
+    }
+
+    private static String cleanKey(String raw) {
+        String v = raw == null ? "" : raw.trim().toLowerCase();
+        int at = v.indexOf("k=");
+        if (at >= 0) v = v.substring(at + 2);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < v.length() && sb.length() < 16; i++) {
+            char c = v.charAt(i);
+            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    private void applyKey(String raw) {
+        String key = cleanKey(raw);
+        if (key.length() != 16) {
+            Toast.makeText(this, R.string.key_bad, Toast.LENGTH_LONG).show();
+            return;
+        }
+        prefs.boardId(key);
+        lastTasks = null;
+        sections.clear();
+        activeSection = "";
+        if (adapter != null) adapter.setItems(new ArrayList<>());
+        Toast.makeText(this, R.string.key_ok, Toast.LENGTH_SHORT).show();
+        load();
     }
 
     private void registerBoard() {
