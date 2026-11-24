@@ -21,7 +21,7 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "1.3.2";
+        public const string Version = "2.0.0";
         public const string UpdateArg = "/update";
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]

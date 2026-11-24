@@ -80,14 +80,29 @@ curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 
 Ключ доски — это и есть авторизация: кто знает ключ, тот видит доску. Ничего другого сервер про пользователя не хранит, аналитики и трекинга нет, наружу отдаются только задачи и разделы.
 
-**Вариант 3 — свой сервер.** Сервер — это один файл `server.js` из репозитория `nexus-tasks` (папка `site`), без базы данных:
+**Вариант 3 — свой сервер.** Сервер лежит в этом же репозитории, папка `server`, без базы данных:
 
 ```bash
-node server.js            # слушает 8788, доски в site/boards/*.json
-NEXUS_SITE_PORT=9000 node server.js
+node server/server.js          # слушает 8788, доски в server/boards/*.json, задачи в data/tasks.json
+NEXUS_SITE_PORT=9000 node server/server.js
 ```
 
 В настройках приложения (ПК: `⋯` → Настройки, телефон: долгое нажатие по заголовку) замените адрес сервера на свой — `http://192.168.1.11:9000` в домашней сети или на адрес, куда вы его выставили. Остальное не меняется: `POST /api/b/new` создаст доску уже на вашем сервере.
+
+## Прогресс и командная строка (бывший Nexus-Tasks)
+
+`NexusBoard.exe` — не только окно. Тот же файл работает как CLI доски прогресса, отдельная утилита больше не нужна:
+
+```
+NexusBoard.exe --add "Текст задачи" --mode night --note "детали" --prio 1
+NexusBoard.exe --start t6
+NexusBoard.exe --progress t6 --to 40 --note "что сделано"
+NexusBoard.exe --done t6            (или --block t6 --note "причина")
+NexusBoard.exe --mode task          (idle | task | auto | night)
+NexusBoard.exe --list               (--json для машинного чтения)
+```
+
+Данные — `data/tasks.json` рядом с программой, лента — `data/activity.ndjson`. Тот же `server/server.js` отдаёт их в браузер: `/api/tasks`, `/api/activity`, `/api/train`, `/api/health`. Одно приложение, один репозиторий, один установщик.
 
 ## Обучение (режим Nexus)
 
@@ -143,7 +158,7 @@ curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 
 `status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board. The key is the whole authorisation: whoever knows it sees the board. Nothing else about the user is stored, no tracking, only tasks and sections are served.
 
-**Your own server:** the backend is a single `server.js` from the `nexus-tasks` repo (`site` folder), no database.
+**Your own server:** the backend ships in this same repo, folder `server`, no database.
 
 ```bash
 node server.js                          # port 8788, boards in site/boards/*.json

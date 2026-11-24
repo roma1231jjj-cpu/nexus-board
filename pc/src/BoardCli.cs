@@ -67,7 +67,8 @@ namespace NexusBoard.Cli
                 string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
                 string dir = Path.GetDirectoryName(exe);
                 string up = Path.GetFullPath(Path.Combine(dir, "..", "data"));
-                string root = Directory.Exists(up) ? up : Path.Combine(dir, "data");
+                string local = Path.Combine(dir, "data");
+                string root = File.Exists(Path.Combine(up, "tasks.json")) ? up : local;
                 if (!Directory.Exists(root)) Directory.CreateDirectory(root);
                 return root;
             }
