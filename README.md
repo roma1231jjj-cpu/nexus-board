@@ -166,3 +166,12 @@ NEXUS_SITE_PORT=9000 node server.js
 ```
 
 Change the server address in the app settings (PC: `⋯` → Settings, phone: long-press the title) and everything else stays the same.
+## Чат с ИИ и подключение ключом
+
+Переписка живёт в том же приложении: на телефоне — кнопка 💬 в шапке, на ПК — вкладка «Чат». Ответы приходят сами, история хранится по ключу доски.
+
+| Чат на ПК | Ключ на телефоне (вставка из буфера) |
+|---|---|
+| ![](docs/en-pc-chat.png) | ![](docs/en-key-android.png) |
+
+Ключ можно вставить из буфера — телефон подключается к доске ПК и наоборот.

@@ -106,3 +106,12 @@ NexusBoard.exe --chat-say "reply"
 ## License
 
 MIT — see [LICENSE](LICENSE).
+## Chat with the AI and connecting by key
+
+The conversation lives in the same app: 💬 in the phone header, the “Chat” tab on PC. Replies arrive on their own, history is kept per board key.
+
+| Chat on PC | Key on the phone (paste from clipboard) |
+|---|---|
+| ![](docs/en-pc-chat.png) | ![](docs/en-key-android.png) |
+
+The key can be pasted from the clipboard — the phone joins the PC board and the other way around.
