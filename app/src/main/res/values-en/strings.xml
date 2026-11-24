@@ -61,4 +61,16 @@
     <string name="connecting">Connecting…</string>
     <string name="net_error_tap">offline · tap to retry</string>
     <string name="update_none">No updates, latest version</string>
+
+    <string name="chat_title">Chat</string>
+    <string name="chat_hint">Write a message…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_send_glyph">➤</string>
+    <string name="chat_back">Back</string>
+    <string name="chat_back_glyph">‹</string>
+    <string name="chat_empty_title">No messages yet</string>
+    <string name="chat_empty_body">Start first — write something and the assistant answers right here.</string>
+    <string name="chat_net_error">No connection to the server · tap to retry</string>
+    <string name="chat_send_failed">Not sent · no connection to the server</string>
+    <string name="chat_need_board">Connect the board first · tap to retry</string>
 </resources>

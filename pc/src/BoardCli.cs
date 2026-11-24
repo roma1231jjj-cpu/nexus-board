@@ -465,6 +465,81 @@ namespace NexusBoard.Cli
             return null;
         }
 
+        static NexusBoard.Settings ChatSettings()
+        {
+            return NexusBoard.Settings.Load();
+        }
+
+        static string ChatBase(NexusBoard.Settings s)
+        {
+            string b = string.IsNullOrEmpty(s.Base) ? "https://board.nexus-your-heper.ru" : s.Base;
+            return b.TrimEnd('/');
+        }
+
+        static string HttpJson(string url, string postJson)
+        {
+            try
+            {
+                System.Net.ServicePointManager.SecurityProtocol =
+                    System.Net.SecurityProtocolType.Tls12 | System.Net.SecurityProtocolType.Tls11 | System.Net.SecurityProtocolType.Tls;
+            }
+            catch { }
+            using (var wc = new System.Net.WebClient())
+            {
+                wc.Encoding = Encoding.UTF8;
+                wc.Headers.Add("User-Agent", "NexusBoardPC/chat");
+                if (postJson != null)
+                {
+                    wc.Headers.Add("Content-Type", "application/json");
+                    return wc.UploadString(url, postJson);
+                }
+                return wc.DownloadString(url);
+            }
+        }
+
+        static int ChatListCmd(bool json)
+        {
+            var s = ChatSettings();
+            if (string.IsNullOrEmpty(s.Board)) { Out("ERR нет ключа доски: открой приложение → Ключ"); return 2; }
+            string raw;
+            try { raw = HttpJson(ChatBase(s) + "/api/c/list?board=" + s.Board + "&since=0&limit=50", null); }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+            if (json) { Out(raw); return 0; }
+            var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+            if (o == null || !o.ContainsKey("messages")) { Out("ERR пустой ответ"); return 1; }
+            var arr = o["messages"] as object[];
+            if (arr == null || arr.Length == 0) { Out("чат пуст"); return 0; }
+            foreach (var item in arr)
+            {
+                var m = item as Dictionary<string, object>;
+                if (m == null) continue;
+                string who = Convert.ToString(m.ContainsKey("from") ? m["from"] : "") == "ai" ? "ИИ" : "ты";
+                long ts = m.ContainsKey("ts") ? Convert.ToInt64(m["ts"]) : 0;
+                string when = ts > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(ts).ToLocalTime().ToString("HH:mm") : "";
+                string text = Convert.ToString(m.ContainsKey("text") ? m["text"] : "").Replace("\r", " ").Replace("\n", " ");
+                Out(when + " " + who + ": " + text);
+            }
+            return 0;
+        }
+
+        static int ChatSayCmd(string text)
+        {
+            text = (text ?? "").Trim();
+            if (text.Length == 0) { Out("ERR пустой текст"); return 2; }
+            var s = ChatSettings();
+            if (string.IsNullOrEmpty(s.Board)) { Out("ERR нет ключа доски"); return 2; }
+            var payload = new Dictionary<string, object> { { "board", s.Board }, { "from", "ai" }, { "text", text } };
+            try
+            {
+                string raw = HttpJson(ChatBase(s) + "/api/c/send", new JavaScriptSerializer().Serialize(payload));
+                var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                Out(ok ? "SENT" : "ERR " + raw);
+                return ok ? 0 : 1;
+            }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+        }
+
         public static int Run(string[] args)
         {
             var d = Parse(args);
@@ -476,6 +551,17 @@ namespace NexusBoard.Cli
 
             switch (cmd)
             {
+                case "chat-list":
+                case "chat":
+                    return ChatListCmd(d.ContainsKey("json"));
+
+                case "chat-say":
+                    {
+                        string text = Get(d, "chat-say");
+                        if (string.IsNullOrWhiteSpace(text)) text = Get(d, "_positional").Replace("", " ");
+                        return ChatSayCmd(text);
+                    }
+
                 case "help":
                 case "h":
                 case "?":
@@ -736,6 +822,8 @@ namespace NexusBoard.Cli
                 "  --open            показать/запустить окно",
                 "  --autostart on|off|status",
                 "  --lang ru|en      язык интерфейса",
+                "  --chat-list [--json]   переписка с владельцем",
+                "  --chat-say \"текст\"     ответить владельцу в чат",
                 "  --path            путь к tasks.json",
                 "  --help",
                 "",
@@ -764,6 +852,8 @@ namespace NexusBoard.Cli
                 "  --open            show/start the window",
                 "  --autostart on|off|status",
                 "  --lang ru|en      interface language",
+                "  --chat-list [--json]   chat history",
+                "  --chat-say \"text\"      reply to the owner in chat",
                 "  --path            path to tasks.json",
                 "  --help",
                 "",

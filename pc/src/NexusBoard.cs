@@ -32,7 +32,7 @@ namespace NexusBoard
         {
             string[] cliVerbs = { "--add", "--plan", "--start", "--doing", "--done", "--block", "--blocked",
                 "--todo", "--drop", "--dropped", "--progress", "--note", "--log", "--mode", "--clear",
-                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest" };
+                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest", "--chat-list", "--chat", "--chat-say" };
             if (args.Length >= 1 && Array.IndexOf(cliVerbs, args[0]) >= 0)
             {
                 AttachConsole(-1);
@@ -123,17 +123,18 @@ namespace NexusBoard
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            string shot = null, shotTheme = null, shotLang = null;
+            string shot = null, shotTheme = null, shotLang = null, shotView = null;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--shot" && i + 1 < args.Length) shot = args[++i];
                 else if (args[i] == "--theme" && i + 1 < args.Length) shotTheme = args[++i];
                 else if (args[i] == "--lang" && i + 1 < args.Length) shotLang = args[++i];
+                else if (args[i] == "--view" && i + 1 < args.Length) shotView = args[++i];
             }
             if (shot != null)
             {
                 var f = new MainForm();
-                f.ShotLook(shotTheme, shotLang);
+                f.ShotLook(shotTheme, shotLang, shotView);
                 try { Cursor.Position = new Point(0, 0); } catch { }
                 var worker = new System.Threading.Thread(() =>
                 {
@@ -338,6 +339,12 @@ namespace NexusBoard
             { "err", new[] { "Ошибка", "Error" } },
             { "tab_board", new[] { "Доска", "Board" } },
             { "tab_train", new[] { "Обучение", "Training" } },
+            { "tab_chat", new[] { "Чат", "Chat" } },
+            { "chat_hint", new[] { "Написать ИИ…", "Message the AI…" } },
+            { "chat_send", new[] { "Отправить", "Send" } },
+            { "chat_empty", new[] { "Пока пусто. Напиши первым — я отвечу здесь.", "Nothing yet. Say hi — I will answer here." } },
+            { "chat_me", new[] { "ты", "you" } },
+            { "chat_ai", new[] { "ИИ", "AI" } },
             { "tr_running", new[] { "идёт обучение", "training in progress" } },
             { "tr_dead", new[] { "обучение остановлено", "training is not running" } },
             { "tr_loss", new[] { "loss", "loss" } },
@@ -431,6 +438,18 @@ namespace NexusBoard
             Post("/api/b/section/add?b=" + board, new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "name", name } }));
         }
 
+        public Dictionary<string, object> ChatList(string board, long since)
+        {
+            return new JavaScriptSerializer().DeserializeObject(
+                Get("/api/c/list?board=" + board + "&since=" + since + "&limit=200")) as Dictionary<string, object>;
+        }
+
+        public void ChatSend(string board, string from, string text)
+        {
+            var d = new Dictionary<string, object> { { "board", board }, { "from", from }, { "text", text } };
+            Post("/api/c/send", new JavaScriptSerializer().Serialize(d));
+        }
+
         public string CheckUpdate()
         {
             try
@@ -453,6 +472,12 @@ namespace NexusBoard
     class SectionItem
     {
         public string Id, Name;
+    }
+
+    class ChatMsg
+    {
+        public string Id, From, Text;
+        public long Ts;
     }
 
     class Round : Panel
@@ -522,11 +547,17 @@ namespace NexusBoard
         DateTime lastSync = DateTime.MinValue;
         bool owner = false;
         bool trainView = false;
+        bool chatView = false;
+        List<ChatMsg> chatMsgs = new List<ChatMsg>();
+        long chatLast = 0;
         Dictionary<string, object> train;
 
         Label lblTitle, lblSub;
         FlowLayoutPanel tabs, list;
         FlatButton btnRefresh, btnMenu, btnUpdate, btnKey;
+        Panel chatBar;
+        TextBox chatInput;
+        FlatButton chatSend;
         string updateVersion = "";
         System.Windows.Forms.Timer timer;
         ContextMenuStrip menu;
@@ -565,7 +596,7 @@ namespace NexusBoard
             };
 
             timer = new System.Windows.Forms.Timer { Interval = 10000 };
-            timer.Tick += (s, e) => { if (trainView) LoadTrain(); else LoadBoard(); };
+            timer.Tick += (s, e) => { if (chatView) LoadChat(false); else if (trainView) LoadTrain(); else LoadBoard(); };
             timer.Start();
         }
 
@@ -616,6 +647,30 @@ namespace NexusBoard
             bar.BringToFront();
             tabs = new FlowLayoutPanel { Location = new Point(30, 6), Height = 44, AutoSize = true, WrapContents = false, BackColor = Color.Transparent };
             bar.Controls.Add(tabs);
+
+            chatBar = new Panel { Dock = DockStyle.Bottom, Height = 72, BackColor = Color.Transparent, Visible = false };
+            Controls.Add(chatBar);
+
+            chatInput = new TextBox
+            {
+                Location = new Point(30, 16),
+                Height = 38,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+            };
+            chatInput.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter && !e.Shift)
+                {
+                    e.SuppressKeyPress = true;
+                    SendChat();
+                }
+            };
+            chatBar.Controls.Add(chatInput);
+
+            chatSend = new FlatButton { Text = L.T("chat_send"), Font = FontCache.Get("Segoe UI Semibold", 9.5f, FontStyle.Bold), Size = new Size(122, 38), Location = new Point(0, 16) };
+            chatSend.Click += (s, e) => SendChat();
+            chatBar.Controls.Add(chatSend);
 
             list = new FlowLayoutPanel
             {
@@ -734,6 +789,12 @@ namespace NexusBoard
 
         void LayoutHeader()
         {
+            if (chatBar != null)
+            {
+                int w = Math.Max(200, chatBar.ClientSize.Width - 30 - 132);
+                chatInput.Width = w;
+                chatSend.Left = 30 + w + 12;
+            }
             btnKey.Text = L.Lang == "en" ? "KEY" : "КЛЮЧ";
             int right = ClientSize.Width - 30;
             btnRefresh.Location = new Point(right - btnRefresh.Width, 26);
@@ -787,6 +848,14 @@ namespace NexusBoard
             StyleButton(btnRefresh);
             StyleButton(btnUpdate);
             StyleButton(btnKey);
+            if (chatBar != null)
+            {
+                chatBar.BackColor = Color.Transparent;
+                chatInput.BackColor = th.Card;
+                chatInput.ForeColor = th.Text;
+                chatSend.BackColor = th.Accent;
+                chatSend.ForeColor = th.AccentText;
+            }
             btnKey.ForeColor = th.Accent;
             BuildMenu();
             Render();
@@ -823,22 +892,24 @@ namespace NexusBoard
         void Render()
         {
             RenderTabs();
-            if (trainView) RenderTraining(); else RenderTasks();
-            lblSub.Text = lastSync == DateTime.MinValue
-                ? L.T("loading")
-                : (L.Lang == "en" ? "updated " : "обновлено ") + lastSync.ToString("HH:mm");
+            if (chatView) RenderChat(); else if (trainView) RenderTraining(); else RenderTasks();
+            if (chatBar != null) chatBar.Visible = chatView;
+            if (!chatView)
+            {
+                lblSub.Text = lastSync == DateTime.MinValue
+                    ? L.T("loading")
+                    : (L.Lang == "en" ? "updated " : "обновлено ") + lastSync.ToString("HH:mm");
+            }
             Invalidate();
         }
 
         void RenderTabs()
         {
             ClearControls(tabs);
-            if (!string.IsNullOrEmpty(settings.Key))
-            {
-                tabs.Controls.Add(TabChip(L.T("tab_board"), "__board", !trainView));
-                tabs.Controls.Add(TabChip(L.T("tab_train"), "__train", trainView));
-            }
-            if (trainView) return;
+            tabs.Controls.Add(TabChip(L.T("tab_board"), "__board", !trainView && !chatView));
+            tabs.Controls.Add(TabChip(L.T("tab_train"), "__train", trainView));
+            tabs.Controls.Add(TabChip(L.T("tab_chat"), "__chat", chatView));
+            if (trainView || chatView) return;
             tabs.Controls.Add(TabChip(L.T("all"), "", activeSection == ""));
             foreach (var s in sections) tabs.Controls.Add(TabChip(s.Name, s.Id, activeSection == s.Id));
         }
@@ -866,8 +937,9 @@ namespace NexusBoard
             };
             EventHandler pick = (s, e) =>
             {
-                if (id == "__train") { trainView = true; Render(); LoadTrain(); return; }
-                if (id == "__board") { trainView = false; Render(); LoadBoard(); return; }
+                if (id == "__train") { trainView = true; chatView = false; Render(); LoadTrain(); return; }
+                if (id == "__chat") { chatView = true; trainView = false; Render(); LoadChat(true); return; }
+                if (id == "__board") { trainView = false; chatView = false; Render(); LoadBoard(); return; }
                 activeSection = id;
                 Render();
             };
@@ -1125,8 +1197,154 @@ namespace NexusBoard
             });
         }
 
+        void RenderChat()
+        {
+            list.SuspendLayout();
+            ClearControls(list);
+            int width = Math.Max(320, list.ClientSize.Width - 60);
+
+            if (chatMsgs.Count == 0)
+            {
+                var empty = new Round
+                {
+                    Radius = 18,
+                    Fill = th.Card,
+                    BorderColor = th.Line,
+                    Size = new Size(Math.Min(width, 520), 92),
+                    Margin = new Padding(0, 0, 0, 12)
+                };
+                var lb = new Label
+                {
+                    Text = L.T("chat_empty"),
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                };
+                empty.Controls.Add(lb);
+                list.Controls.Add(empty);
+            }
+
+            foreach (var m in chatMsgs)
+            {
+                bool mine = m.From == "owner";
+                int bubbleWidth = Math.Min(width, 640);
+                var bubble = new Round
+                {
+                    Radius = 16,
+                    Fill = mine ? th.Accent : th.Card,
+                    BorderColor = mine ? th.Accent : th.Line,
+                    Size = new Size(bubbleWidth, 10),
+                    Margin = new Padding(mine ? Math.Max(0, width - bubbleWidth) : 0, 0, 0, 10)
+                };
+                var head = new Label
+                {
+                    Text = (mine ? L.T("chat_me") : L.T("chat_ai")) + " · " + DateTimeOffset.FromUnixTimeMilliseconds(m.Ts).ToLocalTime().ToString("HH:mm"),
+                    AutoSize = true,
+                    Location = new Point(18, 12),
+                    ForeColor = mine ? th.AccentText : th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 8.5f, FontStyle.Bold)
+                };
+                var body = new Label
+                {
+                    Text = m.Text,
+                    AutoSize = true,
+                    MaximumSize = new Size(bubbleWidth - 36, 0),
+                    Location = new Point(18, 34),
+                    ForeColor = mine ? th.AccentText : th.Text,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                };
+                bubble.Controls.Add(head);
+                bubble.Controls.Add(body);
+                bubble.Height = body.PreferredHeight + 52;
+                list.Controls.Add(bubble);
+            }
+
+            list.ResumeLayout();
+            if (list.Controls.Count > 0)
+            {
+                list.ScrollControlIntoView(list.Controls[list.Controls.Count - 1]);
+            }
+        }
+
+        void LoadChat(bool reset)
+        {
+            if (string.IsNullOrEmpty(boardId)) return;
+            try
+            {
+                if (reset)
+                {
+                    chatMsgs.Clear();
+                    chatLast = 0;
+                }
+                var snap = api.ChatList(boardId, chatLast);
+                if (snap == null) return;
+                if (snap.ContainsKey("messages") && snap["messages"] is object[])
+                {
+                    foreach (var o in (object[])snap["messages"])
+                    {
+                        var d = o as Dictionary<string, object>;
+                        if (d == null) continue;
+                        var msg = new ChatMsg
+                        {
+                            Id = Str(d, "id"),
+                            From = Str(d, "from"),
+                            Text = Str(d, "text"),
+                            Ts = Convert.ToInt64(d.ContainsKey("ts") ? d["ts"] : 0L)
+                        };
+                        if (chatMsgs.Exists(x => x.Id == msg.Id)) continue;
+                        chatMsgs.Add(msg);
+                        if (msg.Ts > chatLast) chatLast = msg.Ts;
+                    }
+                }
+                if (chatMsgs.Count > 300) chatMsgs = chatMsgs.GetRange(chatMsgs.Count - 300, 300);
+                if (chatView) RenderChat();
+                lblSub.Text = chatLast > 0
+                    ? (L.Lang == "en" ? "chat · replies come from the AI" : "чат · отвечает ИИ")
+                    : (L.Lang == "en" ? "chat" : "чат");
+            }
+            catch { }
+        }
+
+        void SendChat()
+        {
+            string text = (chatInput.Text ?? "").Trim();
+            if (text.Length == 0 || string.IsNullOrEmpty(boardId)) return;
+            chatInput.Text = "";
+            try
+            {
+                api.ChatSend(boardId, "owner", text);
+                LoadChat(false);
+            }
+            catch
+            {
+                chatInput.Text = text;
+            }
+        }
+
         void RenderTraining()
         {
+            if (string.IsNullOrEmpty(settings.Key))
+            {
+                ClearControls(list);
+                var hint = new Round { Radius = 18, Fill = th.Card, BorderColor = th.Line, Size = new Size(560, 108) };
+                hint.Controls.Add(new Label
+                {
+                    Text = L.Lang == "en"
+                        ? "Training needs the site access key.\nSettings (Ctrl+Alt+S) → field «Site key»."
+                        : "Для обучения нужен ключ доступа к сайту.\nНастройки (Ctrl+Alt+S) → поле «Ключ сайта».",
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                });
+                list.Controls.Add(hint);
+                return;
+            }
             ClearControls(list);
             list.FlowDirection = FlowDirection.TopDown;
             list.WrapContents = false;
@@ -1313,8 +1531,12 @@ namespace NexusBoard
             });
         }
 
-        public void ShotLook(string theme, string lang)
+        public void ShotLook(string theme, string lang, string view)
         {
+            if (view == "chat")
+            {
+                chatView = true;
+            }
             if (!string.IsNullOrEmpty(theme))
             {
                 th = Theme.Get(theme);
@@ -1327,7 +1549,7 @@ namespace NexusBoard
             }
             settings.Save();
             ApplyTheme();
-            LoadBoard();
+            if (chatView) { Render(); LoadChat(true); } else LoadBoard();
         }
 
         void Click_Theme(object s, EventArgs e)

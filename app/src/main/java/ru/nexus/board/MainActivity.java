@@ -109,6 +109,8 @@ public class MainActivity extends AppCompatActivity {
         swipe.setOnRefreshListener(this::load);
 
         findViewById(R.id.btn_theme).setOnClickListener(v -> nextTheme());
+        findViewById(R.id.btn_chat).setOnClickListener(v ->
+                startActivity(new Intent(MainActivity.this, ChatActivity.class)));
         findViewById(R.id.btn_lang).setOnClickListener(v -> switchLang());
         findViewById(R.id.btn_key).setOnClickListener(v -> openConnect());
         findViewById(R.id.btn_update).setOnClickListener(v -> {

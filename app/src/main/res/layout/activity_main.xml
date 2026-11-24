@@ -49,6 +49,18 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/btn_chat"
+                android:layout_width="40dp"
+                android:layout_height="42dp"
+                android:layout_marginStart="6dp"
+                android:gravity="center"
+                android:text="💬"
+                android:textColor="?attr/nxText"
+                android:textSize="16sp"
+                android:background="@drawable/nx_card"
+                android:contentDescription="@string/chat_title" />
+
+            <TextView
                 android:id="@+id/btn_lang"
                 android:layout_width="40dp"
                 android:layout_height="42dp"

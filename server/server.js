@@ -257,7 +257,7 @@ const server = http.createServer((req, res) => {
   const url = parsed.pathname;
   const host = String(req.headers.host || "").toLowerCase();
   const trainHost = host.startsWith("train.");
-  if (url !== "/api/health" && !url.startsWith("/api/b/") && !url.startsWith("/api/app/") && !url.startsWith("/app/") && !allowed(req, parsed.searchParams)) {
+  if (url !== "/api/health" && !url.startsWith("/api/b/") && !url.startsWith("/api/c/") && !url.startsWith("/api/app/") && !url.startsWith("/app/") && !allowed(req, parsed.searchParams)) {
     res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     return res.end(gatePage());
   }
@@ -445,6 +445,72 @@ const server = http.createServer((req, res) => {
     }
 
     return json(res, 404, { ok: false, error: "unknown board endpoint" });
+  }
+
+  if (url.startsWith("/api/c/")) {
+    const CHAT = path.join(__dirname, "chat");
+    const queryId = (parsed.searchParams.get("board") || "").toString();
+    const file = (id) => path.join(CHAT, id + ".json");
+    const loadChat = (id) => {
+      try {
+        const d = JSON.parse(fs.readFileSync(file(id), "utf8"));
+        d.messages = Array.isArray(d.messages) ? d.messages : [];
+        return d;
+      } catch (e) {
+        return { board: id, messages: [] };
+      }
+    };
+    const saveChat = (data) => {
+      fs.mkdirSync(CHAT, { recursive: true });
+      data.updated = new Date().toISOString();
+      const target = file(data.board);
+      const tmp = target + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(data), "utf8");
+      fs.renameSync(tmp, target);
+    };
+    const pushMessage = (id, from, text) => {
+      const data = loadChat(id);
+      const msg = {
+        id: crypto.randomBytes(8).toString("hex"),
+        from: from === "ai" ? "ai" : "owner",
+        text,
+        ts: Date.now(),
+      };
+      data.messages.push(msg);
+      if (data.messages.length > 500) data.messages = data.messages.slice(-500);
+      saveChat(data);
+      return msg;
+    };
+
+    if (url === "/api/c/send" && req.method === "POST") {
+      return readBody(req).then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        const id = String(payload.board || queryId || "").trim();
+        if (!/^[a-f0-9]{16}$/.test(id)) return json(res, 400, { ok: false, error: "bad board id" });
+        const text = String(payload.text == null ? "" : payload.text).trim().slice(0, 4000);
+        if (!text) return json(res, 400, { ok: false, error: "text required" });
+        const msg = pushMessage(id, payload.from, text);
+        return json(res, 200, { ok: true, id: msg.id, ts: msg.ts });
+      });
+    }
+
+    if (url === "/api/c/list" && req.method === "GET") {
+      if (!/^[a-f0-9]{16}$/.test(queryId)) return json(res, 400, { ok: false, error: "bad board id" });
+      const data = loadChat(queryId);
+      const since = Number(parsed.searchParams.get("since") || 0) || 0;
+      const limit = Math.max(1, Math.min(500, Number(parsed.searchParams.get("limit") || 200) || 200));
+      let list = since > 0 ? data.messages.filter((m) => m.ts > since) : data.messages;
+      if (list.length > limit) list = list.slice(-limit);
+      const last = data.messages.length ? data.messages[data.messages.length - 1].ts : 0;
+      return json(res, 200, { ok: true, messages: list, last, count: data.messages.length });
+    }
+
+    return json(res, 404, { ok: false, error: "unknown chat endpoint" });
   }
 
   if (url === "/api/app/latest") {

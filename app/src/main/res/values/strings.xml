@@ -61,4 +61,16 @@
     <string name="connecting">Подключаюсь…</string>
     <string name="net_error_tap">нет связи · нажми, чтобы повторить</string>
     <string name="update_none">Обновлений нет, версия последняя</string>
+
+    <string name="chat_title">Общение</string>
+    <string name="chat_hint">Написать сообщение…</string>
+    <string name="chat_send">Отправить</string>
+    <string name="chat_send_glyph">➤</string>
+    <string name="chat_back">Назад</string>
+    <string name="chat_back_glyph">‹</string>
+    <string name="chat_empty_title">Пока нет сообщений</string>
+    <string name="chat_empty_body">Начни первым — напиши что-нибудь, ассистент ответит здесь же.</string>
+    <string name="chat_net_error">Нет связи с сервером · нажми, чтобы повторить</string>
+    <string name="chat_send_failed">Не отправлено · нет связи с сервером</string>
+    <string name="chat_need_board">Сначала подключи доску · нажми, чтобы повторить</string>
 </resources>
