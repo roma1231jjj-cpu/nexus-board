@@ -1,0 +1,580 @@
+const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { execFile } = require("node:child_process");
+
+const ROOT = path.resolve(__dirname, "..");
+const DATA = path.join(ROOT, "data");
+const TASKS = path.join(DATA, "tasks.json");
+const ACT = path.join(DATA, "activity.ndjson");
+const INDEX = path.join(__dirname, "index.html");
+const PORT = Number(process.env.NEXUS_SITE_PORT || 8788);
+const HOST = process.env.NEXUS_SITE_HOST || "127.0.0.1";
+
+let TOKEN = (process.env.NEXUS_SITE_TOKEN || "").trim();
+if (!TOKEN) {
+  try {
+    TOKEN = fs.readFileSync(path.join(__dirname, "token.txt"), "utf8").trim();
+  } catch {}
+}
+
+function cookieValue(req, name) {
+  const raw = req.headers.cookie || "";
+  for (const part of raw.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return v.join("=");
+  }
+  return "";
+}
+
+function allowed(req, query) {
+  if (!TOKEN) return true;
+  if (cookieValue(req, "nxt") === TOKEN) return true;
+  return query.get("k") === TOKEN;
+}
+
+function readTasks() {
+  try {
+    const raw = fs.readFileSync(TASKS, "utf8");
+    const d = JSON.parse(raw);
+    const mtime = fs.statSync(TASKS).mtime.toISOString();
+    return { ok: true, file: mtime, mode: d.Mode || "idle", updated: d.Updated || "", tasks: d.Tasks || [] };
+  } catch (e) {
+    return { ok: false, error: String(e.message || e), mode: "idle", updated: "", tasks: [] };
+  }
+}
+
+const FINETUNE = process.env.NEXUS_FINETUNE || "D:\\finetune";
+
+function tailText(file, bytes) {
+  try {
+    const st = fs.statSync(file);
+    const len = Math.min(st.size, bytes);
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(file, "r");
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    return { text: buf.toString("utf8"), mtime: st.mtimeMs, size: st.size };
+  } catch {
+    return { text: "", mtime: 0, size: 0 };
+  }
+}
+
+function secs(hms) {
+  const p = String(hms).split(":").map(Number);
+  if (p.some(Number.isNaN)) return 0;
+  if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+  if (p.length === 2) return p[0] * 60 + p[1];
+  return p[0] || 0;
+}
+
+function readTrain() {
+  const logPath = path.join(FINETUNE, "runs", "logs", "marathon.log");
+  const chainPath = path.join(FINETUNE, "runs", "logs", "chain_v6.log");
+  const { text, mtime } = tailText(logPath, 400000);
+  const lines = text.split(/[\r\n]+/).filter(Boolean);
+
+  let step = null, total = null, elapsed = null, remain = null, rate = null;
+  let stage = null, unit = null;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i];
+    if (l.includes("Tokenizing")) {
+      const m = l.match(/(\d+)\/(\d+) \[([\d:]+)<([\d:]+),\s*([\d.]+)\s*examples\/s\]/);
+      if (m) {
+        stage = "tokenization";
+        unit = "примеров";
+        step = Number(m[1]); total = Number(m[2]);
+        elapsed = m[3]; remain = m[4];
+        rate = m[5] + " прим/с";
+        break;
+      }
+      continue;
+    }
+    const m = l.match(/(\d+)\/(\d+) \[([\d:]+)<([\d:]+),\s*([\d.]+)\s*s\/it\]/);
+    if (m) {
+      stage = "training";
+      unit = "шагов";
+      step = Number(m[1]); total = Number(m[2]);
+      elapsed = m[3]; remain = m[4];
+      rate = m[5] + " с/шаг";
+      break;
+    }
+  }
+  if (!stage && lines.some(l => l.includes("марафон"))) stage = "start";
+  if (!stage) stage = "build";
+
+  const losses = [];
+  for (const l of lines) {
+    const m = l.match(/['"]?eval_loss['"]?\s*:\s*['"]?([\d.]+)/);
+    if (m) losses.push(Number(m[1]));
+  }
+
+  let run = null, runAt = 0;
+  try {
+    const dir = path.join(FINETUNE, "models", "adapters");
+    for (const name of fs.readdirSync(dir)) {
+      const st = fs.statSync(path.join(dir, name));
+      if (st.isDirectory() && st.mtimeMs > runAt) {
+        runAt = st.mtimeMs;
+        run = name;
+      }
+    }
+  } catch {}
+
+  let phase = null, phaseAt = null, chainLines = [];
+  const chain = tailText(chainPath, 20000);
+  if (chain.text) {
+    chainLines = chain.text.split(/\r?\n/).filter(Boolean).slice(-8);
+    const last = chainLines[chainLines.length - 1] || "";
+    const m = last.match(/^\[([^\]]+)\]\s*(.*)$/);
+    if (m) {
+      phaseAt = m[1];
+      phase = m[2];
+    } else {
+      phase = last;
+    }
+  }
+
+  const alive = mtime > 0 && Date.now() - mtime < 180000;
+  const pct = step && total ? Math.round((step / total) * 1000) / 10 : null;
+
+  return {
+    ok: true,
+    alive,
+    stage,
+    unit,
+    run,
+    step,
+    total,
+    pct,
+    elapsed,
+    remain,
+    remainSeconds: remain ? secs(remain) : null,
+    rate,
+    loss: losses.length ? losses[losses.length - 1] : null,
+    losses: losses.slice(-30),
+    phase,
+    phaseAt,
+    chainLines,
+    logAge: mtime ? Math.round((Date.now() - mtime) / 1000) : null,
+    now: new Date().toISOString(),
+  };
+}
+
+function readActivity(limit) {
+  try {
+    const lines = fs.readFileSync(ACT, "utf8").split("\n").filter(Boolean);
+    const out = [];
+    for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+      try {
+        out.push(JSON.parse(lines[i]));
+      } catch {}
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function json(res, code, body) {
+  const buf = Buffer.from(JSON.stringify(body), "utf8");
+  res.writeHead(code, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": buf.length,
+  });
+  res.end(buf);
+}
+
+function gatePage() {
+  const html = `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nexus — вход по ключу</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:
+radial-gradient(900px 600px at 12% 8%,rgba(139,92,246,.30),transparent 60%),
+radial-gradient(760px 520px at 88% 78%,rgba(37,99,235,.22),transparent 62%),#0A0812;
+color:#EDEAF6;font:16px/1.5 "Segoe UI",system-ui,sans-serif;padding:24px}
+.card{width:100%;max-width:440px;padding:30px 28px 26px;border-radius:22px;
+background:linear-gradient(160deg,rgba(28,22,44,.92),rgba(14,11,24,.94));
+border:1px solid rgba(167,139,250,.22);box-shadow:0 26px 70px -30px rgba(0,0,0,.9)}
+h1{margin:0 0 6px;font-size:20px;letter-spacing:.2px}
+p{margin:0 0 20px;color:#A9A2C0;font-size:14px}
+label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:#8B84A3;margin-bottom:8px}
+input{width:100%;padding:13px 14px;border-radius:12px;border:1px solid rgba(167,139,250,.28);
+background:rgba(10,8,18,.85);color:#EDEAF6;font:15px "Segoe UI",sans-serif;outline:none}
+input:focus{border-color:#8B5CF6;box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+button{margin-top:14px;width:100%;padding:13px 16px;border:0;border-radius:12px;cursor:pointer;
+background:linear-gradient(180deg,#8B5CF6,#6D3BE0);color:#fff;font:600 15px "Segoe UI",sans-serif}
+button:hover{filter:brightness(1.08)}
+.hint{margin-top:14px;font-size:12.5px;color:#7C7594}
+</style></head><body>
+<form class="card" id="f" autocomplete="off">
+  <h1>Nexus — закрытый доступ</h1>
+  <p>Вставь ключ доступа, он запомнится на год.</p>
+  <label for="k">Ключ</label>
+  <input id="k" name="k" type="password" spellcheck="false" autofocus>
+  <button type="submit">Открыть</button>
+  <div class="hint">Или открой ссылку вида <code>/?k=ТОКЕН</code> — тот же результат.</div>
+</form>
+<script>
+document.getElementById("f").addEventListener("submit", function (e) {
+  e.preventDefault();
+  var v = document.getElementById("k").value.trim();
+  if (v) location.href = "/?k=" + encodeURIComponent(v);
+});
+if (location.search.indexOf("k=") === -1 && location.hash) {
+  var m = location.hash.match(/k=([0-9a-f]+)/i);
+  if (m) location.href = "/?k=" + m[1];
+}
+</script></body></html>`;
+  return html;
+}
+
+function readBody(req, limit) {
+  return new Promise((resolve) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > (limit || 65536)) {
+        resolve("");
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", () => resolve(""));
+  });
+}
+
+const server = http.createServer((req, res) => {
+  const parsed = new URL(req.url, `http://${req.headers.host || HOST}`);
+  const url = parsed.pathname;
+  const host = String(req.headers.host || "").toLowerCase();
+  const trainHost = host.startsWith("train.");
+  if (url !== "/api/health" && !url.startsWith("/api/b/") && !url.startsWith("/api/app/") && !url.startsWith("/app/") && !allowed(req, parsed.searchParams)) {
+    res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(gatePage());
+  }
+  if (url !== "/api/health" && parsed.searchParams.get("k") === TOKEN && TOKEN && cookieValue(req, "nxt") !== TOKEN) {
+    res.writeHead(302, {
+      "Set-Cookie": `nxt=${TOKEN}; Path=/; Max-Age=31536000; SameSite=Lax`,
+      Location: req.url,
+    });
+    return res.end();
+  }
+  if (url.startsWith("/hw/")) {
+    const name = decodeURIComponent(url.slice("/hw/".length));
+    if (!/^[A-Za-z0-9._-]+\.png$/.test(name)) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end("not found");
+    }
+    const img = path.join(__dirname, "hw", name);
+    let stat = null;
+    try {
+      stat = fs.statSync(img);
+    } catch (e) {
+    }
+    if (!stat) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end("not found");
+    }
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Content-Length": stat.size,
+      "Cache-Control": "no-store",
+    });
+    return fs.createReadStream(img).pipe(res);
+  }
+
+  // ---------- личные доски: без аккаунтов и ключей ----------
+  // каждая установка приложения получает свой id и пустую доску,
+  // заполняет её свой ИИ через простой POST
+  if (url.startsWith("/api/b/")) {
+    const body = () => readBody(req);
+    const bid = (parsed.searchParams.get("b") || req.headers["x-board"] || "").toString();
+    try {
+      fs.appendFileSync(path.join(__dirname, "logs", "board-hits.log"),
+        [new Date().toISOString(), req.method, url, "board=" + bid,
+          "ua=" + String(req.headers["user-agent"] || "").slice(0, 60)].join(" ") + "\n");
+    } catch (e) {}
+    const okId = /^[a-f0-9]{16}$/.test(bid);
+    const store = () => path.join(__dirname, "boards");
+    const file = (id) => path.join(store(), (id || bid) + ".json");
+
+    const load = (id) => {
+      try {
+        return JSON.parse(fs.readFileSync(file(id), "utf8"));
+      } catch (e) {
+        return { id: id || bid, created: new Date().toISOString(), updated: "", tasks: [] };
+      }
+    };
+    const save = (data) => {
+      data.updated = new Date().toISOString();
+      fs.mkdirSync(store(), { recursive: true });
+      const target = file(data.id);
+      const tmp = target + ".tmp";
+      fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+      fs.renameSync(tmp, target);
+    };
+
+    if (url === "/api/b/new" && req.method === "POST") {
+      const id = crypto.randomBytes(8).toString("hex");
+      save({ id, created: new Date().toISOString(), updated: "", tasks: [], sections: [] });
+      return json(res, 200, { ok: true, id });
+    }
+
+    if (!okId) return json(res, 400, { ok: false, error: "bad board id" });
+
+    if (url === "/api/b/seed" && req.method === "POST") {
+      const data = load();
+      data.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      if (data.tasks.length) return json(res, 200, { ok: true, seeded: false, tasks: data.tasks.length });
+      let tpl = null;
+      try {
+        tpl = JSON.parse(fs.readFileSync(path.join(store(), "_template.json"), "utf8"));
+      } catch (e) {}
+      if (!tpl) return json(res, 200, { ok: true, seeded: false, tasks: 0 });
+      data.tasks = (tpl.tasks || []).map((x) => Object.assign({}, x, { Id: "b" + Math.random().toString(16).slice(2, 8) }));
+      data.sections = tpl.sections || [];
+      save(data);
+      return json(res, 200, { ok: true, seeded: true, tasks: data.tasks.length });
+    }
+
+    if (url === "/api/b/tasks" && req.method === "GET") {
+      const data = load();
+      return json(res, 200, {
+        ok: true,
+        id: data.id,
+        updated: data.updated || "",
+        tasks: data.tasks || [],
+        sections: data.sections || [],
+      });
+    }
+
+    if (url === "/api/b/section" && req.method === "GET") {
+      const data = load();
+      return json(res, 200, { ok: true, sections: data.sections || [] });
+    }
+
+    if ((url === "/api/b/add" || url === "/api/b/update" || url === "/api/b/clear" ||
+         url === "/api/b/section/add" || url === "/api/b/section/del") && req.method === "POST") {
+      return body().then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        const data = load();
+        data.tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        data.sections = Array.isArray(data.sections) ? data.sections : [];
+
+        if (url === "/api/b/section/add") {
+          if (data.sections.length >= 20) return json(res, 400, { ok: false, error: "too many sections" });
+          const name = String(payload.name || "").trim().slice(0, 60);
+          if (!name) return json(res, 400, { ok: false, error: "name required" });
+          const sid = String(payload.id || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24) ||
+            "s" + crypto.randomBytes(3).toString("hex");
+          if (data.sections.some((s) => s.id === sid)) return json(res, 409, { ok: false, error: "section exists" });
+          const sec = { id: sid, name, order: data.sections.length };
+          data.sections.push(sec);
+          save(data);
+          return json(res, 200, { ok: true, section: sec, sections: data.sections });
+        }
+
+        if (url === "/api/b/section/del") {
+          const sid = String(payload.id || "").trim();
+          const before = data.sections.length;
+          data.sections = data.sections.filter((s) => s.id !== sid);
+          if (data.sections.length === before) return json(res, 404, { ok: false, error: "section not found" });
+          data.tasks.forEach((x) => {
+            if (x.Section === sid) x.Section = "";
+          });
+          save(data);
+          return json(res, 200, { ok: true, sections: data.sections });
+        }
+
+        if (url === "/api/b/clear") {
+          data.tasks = [];
+          save(data);
+          return json(res, 200, { ok: true, tasks: 0 });
+        }
+
+        if (url === "/api/b/add") {
+          if (data.tasks.length >= 200) return json(res, 400, { ok: false, error: "board full" });
+          const title = String(payload.title || "").trim().slice(0, 300);
+          if (!title) return json(res, 400, { ok: false, error: "title required" });
+          const task = {
+            Id: "b" + (data.tasks.length + 1) + "-" + crypto.randomBytes(3).toString("hex"),
+            Title: title,
+            Note: String(payload.note || "").slice(0, 2000),
+            Mode: ["auto", "task", "night"].includes(String(payload.mode)) ? String(payload.mode) : "task",
+            Status: ["todo", "doing", "blocked", "done"].includes(String(payload.status)) ? String(payload.status) : "todo",
+            Progress: Math.max(0, Math.min(100, Number(payload.progress) || 0)),
+            Section: String(payload.section || payload.Section || "").slice(0, 24),
+            Created: new Date().toISOString(),
+            Updated: new Date().toISOString(),
+          };
+          data.tasks.push(task);
+          save(data);
+          return json(res, 200, { ok: true, task });
+        }
+
+        const id = String(payload.id || payload.Id || "");
+        const task = data.tasks.find((x) => x.Id === id);
+        if (!task) return json(res, 404, { ok: false, error: "task not found" });
+        if (payload.title != null) task.Title = String(payload.title).slice(0, 300);
+        if (payload.note != null) task.Note = String(payload.note).slice(0, 2000);
+        if (payload.status != null && ["todo", "doing", "blocked", "done"].includes(String(payload.status))) {
+          task.Status = String(payload.status);
+        }
+        if (payload.progress != null) task.Progress = Math.max(0, Math.min(100, Number(payload.progress) || 0));
+        if (payload.section != null || payload.Section != null) {
+          task.Section = String(payload.section != null ? payload.section : payload.Section).slice(0, 24);
+        }
+        task.Updated = new Date().toISOString();
+        save(data);
+        return json(res, 200, { ok: true, task });
+      });
+    }
+
+    return json(res, 404, { ok: false, error: "unknown board endpoint" });
+  }
+
+  if (url === "/api/app/latest") {
+    const file = path.join(__dirname, "app", "latest.json");
+    let body = { ok: false };
+    try {
+      body = JSON.parse(fs.readFileSync(file, "utf8"));
+      body.ok = true;
+    } catch (e) {
+    }
+    return json(res, 200, body);
+  }
+
+  if (url === "/api/app/pc") {
+    const file = path.join(__dirname, "app", "pc", "latest.json");
+    let body = { ok: false };
+    try {
+      body = JSON.parse(fs.readFileSync(file, "utf8"));
+      body.ok = true;
+    } catch (e) {
+    }
+    return json(res, 200, body);
+  }
+
+  if (url.startsWith("/app/")) {
+    const name = decodeURIComponent(url.slice("/app/".length));
+    if (!/^(pc\/)?[A-Za-z0-9._-]+\.(apk|exe|zip)$/.test(name)) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end("not found");
+    }
+    const apk = path.join(__dirname, "app", name);
+    let stat = null;
+    try {
+      stat = fs.statSync(apk);
+    } catch (e) {
+    }
+    if (!stat) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end("not found");
+    }
+    res.writeHead(200, {
+      "Content-Type": "application/vnd.android.package-archive",
+      "Content-Length": stat.size,
+      "Content-Disposition": `attachment; filename="${name}"`,
+      "Cache-Control": "no-store",
+    });
+    return fs.createReadStream(apk).pipe(res);
+  }
+
+  if (trainHost && url === "/") {
+    try {
+      const buf = fs.readFileSync(path.join(__dirname, "train.html"));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(buf);
+    } catch (e) {
+      return json(res, 500, { ok: false, error: String(e.message || e) });
+    }
+  }
+  if (url === "/api/tasks") return json(res, 200, readTasks());
+  if (url === "/api/activity") return json(res, 200, readActivity(40));
+  if (url === "/api/train") return json(res, 200, readTrain());
+  if (url === "/train" || url === "/train.html") {
+    try {
+      const buf = fs.readFileSync(path.join(__dirname, "train.html"));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(buf);
+    } catch (e) {
+      return json(res, 500, { ok: false, error: String(e.message || e) });
+    }
+  }
+  if (url === "/api/health") return json(res, 200, { ok: true, port: PORT });
+  if (url === "/" || url === "/index.html") {
+    try {
+      const buf = fs.readFileSync(INDEX);
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(buf);
+    } catch (e) {
+      return json(res, 500, { ok: false, error: String(e.message || e) });
+    }
+  }
+  json(res, 404, { ok: false, error: "not found" });
+});
+
+server.listen(PORT, HOST, () => {
+  console.log(`Nexus board site: http://${HOST}:${PORT}  (данные: ${TASKS})`);
+  if (process.argv.includes("--open")) {
+    execFile("cmd", ["/c", "start", "", `http://${HOST}:${PORT}`], { windowsHide: true }, () => {});
+  }
+});
+
+server.on("error", (e) => {
+  console.error("порт занят или недоступен:", e.message);
+  process.exit(1);
+});
+
+const PROXY_PORT = Number(process.env.NEXUS_PROXY_PORT || 8789);
+const PROXY_TARGET = process.env.NEXUS_PROXY_TARGET || "http://127.0.0.1:8790";
+
+const proxy = http.createServer((req, res) => {
+  const parsed = new URL(req.url, `http://${req.headers.host || HOST}`);
+  if (!allowed(req, parsed.searchParams)) {
+    res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(gatePage());
+  }
+  if (TOKEN && parsed.searchParams.get("k") === TOKEN) {
+    res.writeHead(302, {
+      "Set-Cookie": `nxt=${TOKEN}; Path=/; Max-Age=31536000; SameSite=Lax`,
+      Location: parsed.pathname,
+    });
+    return res.end();
+  }
+  const up = new URL(PROXY_TARGET);
+  const opts = {
+    hostname: up.hostname,
+    port: up.port || 80,
+    path: req.url,
+    method: req.method,
+    headers: Object.assign({}, req.headers, { host: up.host }),
+  };
+  const preq = http.request(opts, (pres) => {
+    res.writeHead(pres.statusCode || 502, pres.headers);
+    pres.pipe(res);
+  });
+  preq.on("error", (e) => {
+    res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("прогресс-хаб не отвечает: " + e.message);
+  });
+  req.pipe(preq);
+});
+
+proxy.listen(PROXY_PORT, HOST, () => {
+  console.log(`прогресс обучения через ключ: http://${HOST}:${PROXY_PORT} → ${PROXY_TARGET}`);
+});

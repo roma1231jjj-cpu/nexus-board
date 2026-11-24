@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="nxBg" format="color" />
+    <attr name="nxSurface" format="color" />
+    <attr name="nxCard" format="color" />
+    <attr name="nxStroke" format="color" />
+    <attr name="nxPrimary" format="color" />
+    <attr name="nxOnPrimary" format="color" />
+    <attr name="nxText" format="color" />
+    <attr name="nxTextDim" format="color" />
+    <attr name="nxBlob1" format="color" />
+    <attr name="nxBlob2" format="color" />
+    <attr name="nxBlob3" format="color" />
+</resources>

@@ -1,0 +1,17 @@
+data/
+server/boards/
+server/logs/
+server/token.txt
+server/*.log
+server/*.pid
+server/train-sync*.txt
+dist/
+apk/
+*.exe
+*.apk
+*.zip
+node_modules/
+.gradle/
+build/
+app/build/
+local.properties

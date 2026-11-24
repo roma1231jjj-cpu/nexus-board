@@ -1,0 +1,570 @@
+    class MainForm : Form
+    {
+        readonly Settings settings;
+        Theme th;
+        Api api;
+        string boardId = "";
+        List<TaskItem> tasks = new List<TaskItem>();
+        List<SectionItem> sections = new List<SectionItem>();
+        string activeSection = "";
+        DateTime lastSync = DateTime.MinValue;
+
+        Label lblTitle, lblSub, lblStatus;
+        FlowLayoutPanel tabs, list;
+        FlatButton btnRefresh, btnAdd, btnTheme, btnLang, btnSettings, btnSect, btnUpdate;
+        System.Windows.Forms.Timer timer;
+
+        public MainForm()
+        {
+            settings = Settings.Load();
+            L.Lang = settings.Lang == "en" ? "en" : "ru";
+            th = Theme.Get(settings.Theme);
+            api = new Api(settings.Base);
+            boardId = settings.Board;
+
+            Text = "Nexus Board";
+            Width = 1080;
+            Height = 760;
+            MinimumSize = new Size(820, 560);
+            StartPosition = FormStartPosition.CenterScreen;
+            Font = new Font("Segoe UI", 9.5f);
+
+            BuildUi();
+
+            Shown += (s, e) =>
+            {
+                ApplyTheme();
+                if (string.IsNullOrEmpty(boardId)) CreateBoard(); else LoadBoard();
+                CheckUpdate();
+            };
+
+            timer = new System.Windows.Forms.Timer { Interval = 15000 };
+            timer.Tick += (s, e) => LoadBoard();
+            timer.Start();
+        }
+
+        void BuildUi()
+        {
+            var header = new Panel { Dock = DockStyle.Top, Height = 96 };
+            Controls.Add(header);
+
+            lblTitle = new Label { Text = "Nexus Board", AutoSize = true, Font = new Font("Segoe UI Semibold", 21f), Location = new Point(28, 20) };
+            header.Controls.Add(lblTitle);
+
+            lblSub = new Label { AutoSize = true, Font = new Font("Segoe UI", 9f), Location = new Point(30, 60) };
+            header.Controls.Add(lblSub);
+
+            btnUpdate = MakeBtn(header, "Обновить", 0, Click_Update);
+            btnUpdate.Visible = false;
+
+            btnSettings = MakeBtn(header, "", 0, Click_Settings);
+            btnTheme = MakeBtn(header, "", 0, Click_Theme);
+            btnLang = MakeBtn(header, "EN", 0, Click_Lang);
+            btnRefresh = MakeBtn(header, "", 0, (s, e) => LoadBoard());
+
+            var bar = new Panel { Dock = DockStyle.Top, Height = 64 };
+            Controls.Add(bar);
+            bar.BringToFront();
+
+            tabs = new FlowLayoutPanel { Location = new Point(22, 12), Height = 42, AutoSize = true, WrapContents = false };
+            bar.Controls.Add(tabs);
+
+            btnAdd = new FlatButton { Text = "+", Size = new Size(42, 38), Location = new Point(960, 12) };
+            btnAdd.Click += (s, e) => EditTask(null);
+            bar.Controls.Add(btnAdd);
+
+            btnSect = new FlatButton { Text = "+ раздел", Size = new Size(110, 38), Location = new Point(838, 12) };
+            btnSect.Click += (s, e) => NewSection();
+            bar.Controls.Add(btnSect);
+
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 40 };
+            Controls.Add(bottom);
+            lblStatus = new Label { AutoSize = true, Location = new Point(26, 12), Font = new Font("Segoe UI", 9f) };
+            bottom.Controls.Add(lblStatus);
+
+            list = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoScroll = true,
+                Padding = new Padding(22, 8, 22, 22)
+            };
+            Controls.Add(list);
+            list.BringToFront();
+
+            Resize += (s, e) => LayoutButtons();
+            Shown += (s, e) => LayoutButtons();
+        }
+
+        void LayoutButtons()
+        {
+            int right = ClientSize.Width - 28;
+            var header = lblTitle.Parent;
+            int y = 22;
+            btnRefresh.Size = new Size(96, 36);
+            btnTheme.Size = new Size(96, 36);
+            btnLang.Size = new Size(52, 36);
+            btnSettings.Size = new Size(104, 36);
+            btnUpdate.Size = new Size(132, 36);
+
+            btnSettings.Location = new Point(right - btnSettings.Width, y);
+            right -= btnSettings.Width + 8;
+            btnLang.Location = new Point(right - btnLang.Width, y);
+            right -= btnLang.Width + 8;
+            btnTheme.Location = new Point(right - btnTheme.Width, y);
+            right -= btnTheme.Width + 8;
+            btnRefresh.Location = new Point(right - btnRefresh.Width, y);
+            right -= btnRefresh.Width + 8;
+            btnUpdate.Location = new Point(right - btnUpdate.Width, y - 4);
+
+            if (btnSect != null && btnSect.Parent != null)
+            {
+                btnAdd.Location = new Point(ClientSize.Width - 24 - btnAdd.Width, 12);
+                btnSect.Location = new Point(btnAdd.Left - 8 - btnSect.Width, 12);
+            }
+        }
+
+        FlatButton MakeBtn(Control parent, string text, int x, EventHandler onClick)
+        {
+            var b = new FlatButton { Text = text, Location = new Point(x, 22), Size = new Size(96, 36) };
+            b.Click += onClick;
+            parent.Controls.Add(b);
+            return b;
+        }
+
+        void ApplyTheme()
+        {
+            BackColor = th.Back;
+            foreach (Control c in Controls) PaintCtl(c);
+            lblTitle.ForeColor = th.Text;
+            lblSub.ForeColor = th.Dim;
+            lblStatus.ForeColor = th.Dim;
+            btnAdd.Text = "+ " + (L.Lang == "en" ? "Task" : "Задача");
+            btnAdd.Size = new Size(104, 38);
+            btnAdd.Location = new Point(ClientSize.Width - 24 - btnAdd.Width, 12);
+            btnSect.Text = "+ " + (L.Lang == "en" ? "Section" : "раздел");
+            btnSect.Size = new Size(118, 38);
+            btnSect.Location = new Point(btnAdd.Left - 8 - btnSect.Width, 12);
+            btnSettings.Text = L.T("settings");
+            btnTheme.Text = L.T("theme");
+            btnLang.Text = L.Lang == "en" ? "RU" : "EN";
+            btnRefresh.Text = L.T("refresh");
+            btnUpdate.Text = L.T("doupdate");
+            Render();
+            LayoutButtons();
+        }
+
+        void PaintCtl(Control c)
+        {
+            if (c is Round) return;
+            if (c is FlatButton)
+            {
+                var b = (FlatButton)c;
+                b.BackColor = th.Card;
+                b.ForeColor = th.Text;
+                b.FlatAppearance.MouseOverBackColor = th.Chip;
+                return;
+            }
+            if (c is Label) { c.ForeColor = th.Text; }
+            if (c is Panel || c is FlowLayoutPanel || c is TableLayoutPanel) c.BackColor = th.Back;
+            foreach (Control k in c.Controls) PaintCtl(k);
+            if (c is Label && c.Parent != null && c.Parent.Name == "headerSub") c.ForeColor = th.Dim;
+        }
+
+        void Render()
+        {
+            RenderTabs();
+            RenderTasks();
+            lblSub.Text = L.T("about") + "  ·  " + L.T("key") + ": " + (boardId.Length > 0 ? boardId : "—");
+        }
+
+        void RenderTabs()
+        {
+            tabs.Controls.Clear();
+            var all = TabChip(L.T("all"), "", activeSection == "");
+            tabs.Controls.Add(all);
+            foreach (var s in sections)
+            {
+                tabs.Controls.Add(TabChip(s.Name, s.Id, activeSection == s.Id));
+            }
+        }
+
+        Control TabChip(string text, string id, bool active)
+        {
+            var chip = new Round
+            {
+                Radius = 12,
+                Fill = active ? th.Accent : th.Card,
+                BorderColor = active ? th.Accent : th.Line,
+                Size = new Size(Math.Max(72, TextRenderer.MeasureText(text, Font).Width + 34), 38),
+                Margin = new Padding(0, 0, 8, 0),
+                Cursor = Cursors.Hand
+            };
+            var lb = new Label
+            {
+                Text = text,
+                AutoSize = false,
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = active ? th.AccentText : th.Text,
+                BackColor = Color.Transparent,
+                Font = new Font("Segoe UI", 9.5f, active ? FontStyle.Bold : FontStyle.Regular)
+            };
+            lb.Click += (s, e) => { activeSection = id; Render(); };
+            chip.Click += (s, e) => { activeSection = id; Render(); };
+            chip.Controls.Add(lb);
+            return chip;
+        }
+
+        void RenderTasks()
+        {
+            list.SuspendLayout();
+            list.Controls.Clear();
+            var shown = tasks.Where(t => activeSection == "" || t.Section == activeSection).ToList();
+            shown.Sort((a, b) =>
+            {
+                int ra = Rank(a.Status), rb = Rank(b.Status);
+                return ra != rb ? ra.CompareTo(rb) : 0;
+            });
+
+            if (shown.Count == 0)
+            {
+                var empty = new Label
+                {
+                    Text = L.T("empty"),
+                    AutoSize = false,
+                    Width = Math.Max(400, list.Width - 90),
+                    Height = 80,
+                    ForeColor = th.Dim,
+                    Font = new Font("Segoe UI", 10f)
+                };
+                list.Controls.Add(empty);
+            }
+
+            foreach (var t in shown)
+            {
+                list.Controls.Add(TaskCard(t));
+            }
+            list.ResumeLayout();
+        }
+
+        static int Rank(string status)
+        {
+            switch (status)
+            {
+                case "doing": return 0;
+                case "todo": return 1;
+                case "blocked": return 2;
+                case "done": return 3;
+                default: return 1;
+            }
+        }
+
+        Control TaskCard(TaskItem t)
+        {
+            var card = new Round
+            {
+                Radius = 14,
+                Fill = th.Card,
+                BorderColor = th.Line,
+                Width = Math.Max(400, list.Width - 60),
+                Height = string.IsNullOrEmpty(t.Note) ? 96 : 122,
+                Margin = new Padding(0, 0, 0, 10),
+                Cursor = Cursors.Hand
+            };
+
+            var title = new Label
+            {
+                Text = t.Title,
+                AutoSize = false,
+                Width = card.Width - 220,
+                Height = 26,
+                Location = new Point(20, 16),
+                Font = new Font("Segoe UI Semibold", 12.5f),
+                ForeColor = th.Text,
+                BackColor = Color.Transparent
+            };
+            card.Controls.Add(title);
+
+            var chip = new Round
+            {
+                Radius = 9,
+                Fill = th.Chip,
+                BorderColor = th.Chip,
+                Size = new Size(TextRenderer.MeasureText(L.T(t.Status), new Font("Segoe UI", 8.5f)).Width + 26, 24),
+                Location = new Point(card.Width - 130, 17)
+            };
+            var chipText = new Label
+            {
+                Text = L.T(t.Status).ToUpper(),
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+                ForeColor = th.Accent,
+                BackColor = Color.Transparent
+            };
+            chip.Controls.Add(chipText);
+            card.Controls.Add(chip);
+
+            if (!string.IsNullOrEmpty(t.Note))
+            {
+                var note = new Label
+                {
+                    Text = t.Note,
+                    AutoSize = false,
+                    Width = card.Width - 60,
+                    Height = 20,
+                    Location = new Point(20, 46),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    AutoEllipsis = true
+                };
+                card.Controls.Add(note);
+            }
+
+            var barBack = new Panel
+            {
+                BackColor = th.Line,
+                Location = new Point(20, card.Height - 30),
+                Size = new Size(card.Width - 130, 6)
+            };
+            card.Controls.Add(barBack);
+
+            int w = (int)((card.Width - 130) * (Math.Max(0, Math.Min(100, t.Progress)) / 100.0));
+            var barFill = new Panel { BackColor = th.Accent, Location = new Point(0, 0), Size = new Size(Math.Max(2, w), 6) };
+            barBack.Controls.Add(barFill);
+
+            var pct = new Label
+            {
+                Text = t.Progress + "%",
+                AutoSize = false,
+                Width = 54,
+                Height = 20,
+                Location = new Point(card.Width - 96, card.Height - 38),
+                TextAlign = ContentAlignment.MiddleRight,
+                ForeColor = th.Dim,
+                BackColor = Color.Transparent
+            };
+            card.Controls.Add(pct);
+
+            EventHandler open = (s, e) => EditTask(t);
+            card.Click += open;
+            title.Click += open;
+            foreach (Control c in card.Controls) c.Click += open;
+
+            return card;
+        }
+
+        void SetStatus(string text)
+        {
+            lblStatus.Text = text;
+        }
+
+        void CreateBoard()
+        {
+            SetStatus(L.T("loading"));
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string id = api.NewBoard();
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (!string.IsNullOrEmpty(id))
+                        {
+                            boardId = id;
+                            settings.Board = id;
+                            settings.Save();
+                            LoadBoard();
+                        }
+                        else SetStatus(L.T("offline"));
+                    }));
+                }
+                catch
+                {
+                    BeginInvoke((Action)(() => SetStatus(L.T("offline"))));
+                }
+            });
+        }
+
+        void LoadBoard()
+        {
+            if (string.IsNullOrEmpty(boardId)) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var snap = api.Snapshot(boardId);
+                    var parsedTasks = new List<TaskItem>();
+                    var parsedSections = new List<SectionItem>();
+
+                    if (snap != null && snap.ContainsKey("tasks") && snap["tasks"] is object[])
+                    {
+                        foreach (var o in (object[])snap["tasks"])
+                        {
+                            var d = o as Dictionary<string, object>;
+                            if (d == null) continue;
+                            parsedTasks.Add(new TaskItem
+                            {
+                                Id = Str(d, "Id"),
+                                Title = Str(d, "Title"),
+                                Note = Str(d, "Note"),
+                                Mode = Str(d, "Mode"),
+                                Status = Str(d, "Status"),
+                                Section = Str(d, "Section"),
+                                Progress = (int)Num(d, "Progress")
+                            });
+                        }
+                    }
+
+                    if (snap != null && snap.ContainsKey("sections") && snap["sections"] is object[])
+                    {
+                        foreach (var o in (object[])snap["sections"])
+                        {
+                            var d = o as Dictionary<string, object>;
+                            if (d == null) continue;
+                            parsedSections.Add(new SectionItem { Id = Str(d, "id"), Name = Str(d, "name") });
+                        }
+                    }
+
+                    BeginInvoke((Action)(() =>
+                    {
+                        tasks = parsedTasks;
+                        sections = parsedSections;
+                        lastSync = DateTime.Now;
+                        SetStatus(Program.Version + "  ·  " + SectionsLine() + "  ·  " + lastSync.ToString("HH:mm:ss"));
+                        Render();
+                        LayoutButtons();
+                    }));
+                }
+                catch
+                {
+                    BeginInvoke((Action)(() => SetStatus(L.T("offline"))));
+                }
+            });
+        }
+
+        string SectionsLine()
+        {
+            return tasks.Count + " " + (L.Lang == "en" ? "tasks" : "задач") + ", " + sections.Count + " " + (L.Lang == "en" ? "sections" : "разделов");
+        }
+
+        static string Str(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d.TryGetValue(key, out v) && v != null) return Convert.ToString(v);
+            return "";
+        }
+
+        static double Num(Dictionary<string, object> d, string key)
+        {
+            object v;
+            if (d.TryGetValue(key, out v) && v != null)
+            {
+                double r;
+                if (double.TryParse(Convert.ToString(v), NumberStyles.Any, CultureInfo.InvariantCulture, out r)) return r;
+            }
+            return 0;
+        }
+
+        void EditTask(TaskItem t)
+        {
+            using (var dlg = new TaskDialog(api, boardId, th, sections, t))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK) LoadBoard();
+            }
+        }
+
+        void NewSection()
+        {
+            string name = Prompt.Show(this, L.T("newsect"), L.T("sectname"), th);
+            if (string.IsNullOrEmpty(name)) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    api.AddSection(boardId, name);
+                }
+                catch { }
+                BeginInvoke((Action)LoadBoard);
+            });
+        }
+
+        void Click_Theme(object s, EventArgs e)
+        {
+            int i = 0;
+            for (int k = 0; k < Theme.All.Length; k++) if (Theme.All[k].Name == th.Name) i = k;
+            th = Theme.All[(i + 1) % Theme.All.Length];
+            settings.Theme = th.Name;
+            settings.Save();
+            ApplyTheme();
+        }
+
+        void Click_Lang(object s, EventArgs e)
+        {
+            L.Lang = L.Lang == "en" ? "ru" : "en";
+            settings.Lang = L.Lang;
+            settings.Save();
+            ApplyTheme();
+        }
+
+        void Click_Settings(object s, EventArgs e)
+        {
+            using (var dlg = new SettingsDialog(settings, th, boardId))
+            {
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    api = new Api(settings.Base);
+                    boardId = settings.Board;
+                    th = Theme.Get(settings.Theme);
+                    L.Lang = settings.Lang;
+                    ApplyTheme();
+                    if (string.IsNullOrEmpty(boardId)) CreateBoard(); else LoadBoard();
+                }
+            }
+        }
+
+        void CheckUpdate()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string raw = api.CheckUpdate();
+                if (string.IsNullOrEmpty(raw)) return;
+                try
+                {
+                    var d = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                    if (d == null) return;
+                    string ver = d.ContainsKey("versionName") ? Convert.ToString(d["versionName"]) : "";
+                    if (ver != Program.Version && !string.IsNullOrEmpty(ver))
+                    {
+                        BeginInvoke((Action)(() =>
+                        {
+                            btnUpdate.Visible = true;
+                            btnUpdate.Text = L.T("doupdate") + " " + ver;
+                            LayoutButtons();
+                        }));
+                    }
+                }
+                catch { }
+            });
+        }
+
+        void Click_Update(object s, EventArgs e)
+        {
+            try
+            {
+                string url = settings.Base.TrimEnd('/') + "/app/pc/NexusBoard.exe";
+                string tmp = Path.Combine(Path.GetTempPath(), "NexusBoard-new.exe");
+                using (var wc = new WebClient()) wc.DownloadFile(url, tmp);
+                string self = Application.ExecutablePath;
+                System.Diagnostics.Process.Start(tmp, Program.UpdateArg + " \"" + self + "\"");
+                Close();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, L.T("err"));
+            }
+        }
+    }
+

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nexus Board</string>
+    <string name="tab_board">Board</string>
+    <string name="tab_train">Training</string>
+    <string name="updated">updated %1$s</string>
+    <string name="loading">loading…</string>
+    <string name="refresh">Refresh</string>
+    <string name="theme">Theme</string>
+    <string name="language">Language</string>
+    <string name="theme_midnight">Midnight</string>
+    <string name="theme_frost">Frost</string>
+    <string name="theme_graphite">Graphite</string>
+    <string name="sec_now">Now</string>
+    <string name="sec_next">Next</string>
+    <string name="sec_wait">Waiting</string>
+    <string name="sec_done">Done</string>
+    <string name="empty_board">No tasks yet</string>
+    <string name="train_run">Run</string>
+    <string name="train_step">Step</string>
+    <string name="train_rate">Rate</string>
+    <string name="train_loss">Loss</string>
+    <string name="train_eta">ETA</string>
+    <string name="train_phase">Chain</string>
+    <string name="train_dead">Training is not running</string>
+    <string name="train_alive">Training in progress</string>
+    <string name="loss_chart">Loss dynamics</string>
+    <string name="key_title">Board settings</string>
+    <string name="key_hint">key from the link</string>
+    <string name="key_ok">Open</string>
+    <string name="key_cancel">Cancel</string>
+    <string name="key_bad">Wrong key</string>
+    <string name="key_need">Enter your access key</string>
+    <string name="net_error">No connection to the server</string>
+    <string name="update_available">Update %1$s available</string>
+    <string name="update_install">Install</string>
+    <string name="update_dl">Downloading update…</string>
+    <string name="update_ready">Done, opening the installer</string>
+    <string name="all_sections">All</string>
+    <string name="connect">Connection</string>
+    <string name="connect_title">How to connect the board</string>
+    <string name="connect_body">1. This is your personal board. Its key is below.\n2. Paste the same key on the PC (menu ⋯ → Settings) or on the phone (long-press the title) — both devices show one board.\n3. Your AI fills it with POST /api/b/add?b=KEY (title, note, status, progress). Tabs: POST /api/b/section/add?b=KEY.\n4. Data travels through the website, so it works on any network, not only at home.</string>
+    <string name="copy_key">Copy key</string>
+    <string name="key_copied">Key copied</string>
+    <string name="refresh_every">refreshes every 10 s</string>
+    <string name="close">Close</string>
+
+    <string name="empty_title">Nothing yet</string>
+    <string name="empty_body">This is your personal board. Your AI fills it through the API — or add a task yourself: long-press this screen.</string>
+
+    <string name="train_log">Log tail</string>
+    <string name="f_server">Server address</string>
+    <string name="f_key">Nexus key (optional)</string>
+    <string name="f_key_hint">unlocks the Training tab</string>
+    <string name="f_board">Board key</string>
+    <string name="f_board_hint">the same as on the PC — one shared board</string>
+    <string name="f_note">One board key links phone and PC: both show the same tasks. Without a Nexus key the app runs on its own personal board.</string>
+    <string name="unit_steps">steps</string>
+    <string name="unit_epochs">epochs</string>
+    <string name="unit_per_step">s/step</string>
+    <string name="connecting">Connecting…</string>
+    <string name="net_error_tap">offline · tap to retry</string>
+</resources>
