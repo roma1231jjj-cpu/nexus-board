@@ -10,8 +10,8 @@ android {
         applicationId = "ru.nexus.board"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "2.0.0"
+        versionCode = 9
+        versionName = "2.0.1"
         buildFeatures { buildConfig = true }
     }
 

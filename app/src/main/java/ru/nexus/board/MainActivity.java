@@ -108,9 +108,13 @@ public class MainActivity extends AppCompatActivity {
         swipe.setProgressBackgroundColorSchemeColor(NxBackdrop.color(this, R.attr.nxSurface));
         swipe.setOnRefreshListener(this::load);
 
-        findViewById(R.id.btn_refresh).setOnClickListener(v -> load());
         findViewById(R.id.btn_theme).setOnClickListener(v -> nextTheme());
         findViewById(R.id.btn_lang).setOnClickListener(v -> switchLang());
+        findViewById(R.id.btn_key).setOnClickListener(v -> openConnect());
+        findViewById(R.id.btn_update).setOnClickListener(v -> {
+            if (pendingUpdate != null) downloadUpdate();
+            else checkUpdates(true);
+        });
 
         TextView langBtn = findViewById(R.id.btn_lang);
         langBtn.setText("ru".equals(prefs.lang()) ? "EN" : "RU");
@@ -573,9 +577,14 @@ public class MainActivity extends AppCompatActivity {
     // ---------- обновления ----------
 
     private void checkUpdates() {
+        checkUpdates(false);
+    }
+
+    private void checkUpdates(final boolean manual) {
         if (pendingUpdate != null) return;
         long last = prefs.lastUpdateCheck();
-        if (System.currentTimeMillis() - last < 6L * 3600L * 1000L) return;
+        if (!manual && System.currentTimeMillis() - last < 6L * 3600L * 1000L) return;
+        if (manual) status.setText(R.string.loading);
         final String key = prefs.key();
         final String base = prefs.base();
         pool.execute(() -> {
@@ -594,7 +603,10 @@ public class MainActivity extends AppCompatActivity {
                         status.setTextColor(NxBackdrop.color(this, R.attr.nxPrimary));
                         status.setTypeface(Typeface.DEFAULT_BOLD);
                         status.setOnClickListener(v -> downloadUpdate());
+                        findViewById(R.id.btn_update).setBackgroundResource(R.drawable.nx_pill_on);
                     });
+                } else if (manual) {
+                    ui.post(() -> Toast.makeText(this, R.string.update_none, Toast.LENGTH_SHORT).show());
                 }
             } catch (Exception ignored) {
             }

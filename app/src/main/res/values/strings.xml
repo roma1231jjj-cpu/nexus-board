@@ -60,4 +60,5 @@
     <string name="unit_per_step">с/шаг</string>
     <string name="connecting">Подключаюсь…</string>
     <string name="net_error_tap">нет связи · нажми, чтобы повторить</string>
+    <string name="update_none">Обновлений нет, версия последняя</string>
 </resources>

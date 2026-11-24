@@ -60,4 +60,5 @@
     <string name="unit_per_step">s/step</string>
     <string name="connecting">Connecting…</string>
     <string name="net_error_tap">offline · tap to retry</string>
+    <string name="update_none">No updates, latest version</string>
 </resources>

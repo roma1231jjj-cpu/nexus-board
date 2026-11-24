@@ -21,7 +21,7 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.0.0";
+        public const string Version = "2.0.1";
         public const string UpdateArg = "/update";
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
@@ -30,7 +30,10 @@ namespace NexusBoard
         [STAThread]
         static void Main(string[] args)
         {
-            if (args.Length >= 1 && !args[0].StartsWith("/") && !args[0].StartsWith("--selftest"))
+            string[] cliVerbs = { "--add", "--plan", "--start", "--doing", "--done", "--block", "--blocked",
+                "--todo", "--drop", "--dropped", "--progress", "--note", "--log", "--mode", "--clear",
+                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest" };
+            if (args.Length >= 1 && Array.IndexOf(cliVerbs, args[0]) >= 0)
             {
                 AttachConsole(-1);
                 try
@@ -523,7 +526,8 @@ namespace NexusBoard
 
         Label lblTitle, lblSub;
         FlowLayoutPanel tabs, list;
-        FlatButton btnRefresh, btnMenu, btnUpdate;
+        FlatButton btnRefresh, btnMenu, btnUpdate, btnKey;
+        string updateVersion = "";
         System.Windows.Forms.Timer timer;
         ContextMenuStrip menu;
 
@@ -599,7 +603,11 @@ namespace NexusBoard
             btnRefresh.Click += (s, e) => LoadBoard();
             header.Controls.Add(btnRefresh);
 
-            btnUpdate = new FlatButton { Text = "↓", Size = new Size(46, 40), Visible = false };
+            btnKey = new FlatButton { Text = "КЛЮЧ", Font = FontCache.Get("Segoe UI Semibold", 8.5f, FontStyle.Bold), Size = new Size(58, 40) };
+            btnKey.Click += (s, e) => ShowConnect();
+            header.Controls.Add(btnKey);
+
+            btnUpdate = new FlatButton { Text = "↓", Size = new Size(46, 40) };
             btnUpdate.Click += Click_Update;
             header.Controls.Add(btnUpdate);
 
@@ -726,10 +734,12 @@ namespace NexusBoard
 
         void LayoutHeader()
         {
+            btnKey.Text = L.Lang == "en" ? "KEY" : "КЛЮЧ";
             int right = ClientSize.Width - 30;
             btnRefresh.Location = new Point(right - btnRefresh.Width, 26);
             btnMenu.Location = new Point(btnRefresh.Left - btnMenu.Width - 8, 26);
             btnUpdate.Location = new Point(btnMenu.Left - btnUpdate.Width - 8, 26);
+            btnKey.Location = new Point(btnUpdate.Left - btnKey.Width - 8, 26);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -776,6 +786,8 @@ namespace NexusBoard
             StyleButton(btnMenu);
             StyleButton(btnRefresh);
             StyleButton(btnUpdate);
+            StyleButton(btnKey);
+            btnKey.ForeColor = th.Accent;
             BuildMenu();
             Render();
             LayoutHeader();
@@ -1377,6 +1389,7 @@ namespace NexusBoard
                     string ver = d.ContainsKey("versionName") ? Convert.ToString(d["versionName"]) : "";
                     if (ver != Program.Version && !string.IsNullOrEmpty(ver))
                     {
+                        updateVersion = ver;
                         bool already = settings.AutoUpdatedTo == ver;
                         BeginInvoke((Action)(() =>
                         {
@@ -1426,6 +1439,38 @@ namespace NexusBoard
 
         void Click_Update(object s, EventArgs e)
         {
+            if (string.IsNullOrEmpty(updateVersion))
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    string raw = api.CheckUpdate();
+                    string fresh = "";
+                    try
+                    {
+                        var d = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                        if (d != null && d.ContainsKey("versionName")) fresh = Convert.ToString(d["versionName"]);
+                    }
+                    catch { }
+                    try
+                    {
+                        BeginInvoke((Action)(() =>
+                        {
+                            if (!string.IsNullOrEmpty(fresh) && fresh != Program.Version)
+                            {
+                                updateVersion = fresh;
+                                lblSub.Text = (L.Lang == "en" ? "new version " : "новая версия ") + fresh;
+                                AutoInstallUpdate();
+                            }
+                            else
+                            {
+                                lblSub.Text = L.Lang == "en" ? "latest version installed" : "установлена последняя версия";
+                            }
+                        }));
+                    }
+                    catch { }
+                });
+                return;
+            }
             try
             {
                 string url = settings.Base.TrimEnd('/') + "/app/pc/NexusBoard.exe";
