@@ -145,6 +145,87 @@ namespace NexusBoard.Cli
             {
                 File.Move(tmp, TasksFile);
             }
+            PushBoard(b);
+        }
+
+        static string ApiBase()
+        {
+            try
+            {
+                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("http://127.0.0.1:8788/api/health");
+                req.Timeout = 600;
+                req.ReadWriteTimeout = 600;
+                using (var r = req.GetResponse()) { }
+                return "http://127.0.0.1:8788";
+            }
+            catch (Exception) { }
+            var st = NexusBoard.Settings.Load();
+            string b = string.IsNullOrEmpty(st.Base) ? "https://board.nexus-your-heper.ru" : st.Base;
+            return b.TrimEnd('/');
+        }
+
+        public static string BoardId()
+        {
+            try
+            {
+                var st = NexusBoard.Settings.Load();
+                string id = (st.Board ?? "").Trim().ToLowerInvariant();
+                return System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-f0-9]{16}$") ? id : "";
+            }
+            catch (Exception) { return ""; }
+        }
+
+        public static string HttpJsonTimeout(string url, string postJson, int ms)
+        {
+            try
+            {
+                System.Net.ServicePointManager.SecurityProtocol =
+                    System.Net.SecurityProtocolType.Tls12 | System.Net.SecurityProtocolType.Tls11 | System.Net.SecurityProtocolType.Tls;
+            }
+            catch { }
+            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+            req.Timeout = ms;
+            req.ReadWriteTimeout = ms;
+            req.UserAgent = "NexusBoardPC/cli";
+            if (postJson != null)
+            {
+                req.Method = "POST";
+                req.ContentType = "application/json";
+                byte[] raw = Encoding.UTF8.GetBytes(postJson);
+                req.ContentLength = raw.Length;
+                using (var st = req.GetRequestStream()) st.Write(raw, 0, raw.Length);
+            }
+            using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
+            using (var sr = new System.IO.StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+            {
+                return sr.ReadToEnd();
+            }
+        }
+
+        public static string BoardUrl(string pathAndQuery)
+        {
+            string id = BoardId();
+            if (string.IsNullOrEmpty(id)) return null;
+            string sep = pathAndQuery.Contains("?") ? "&" : "?";
+            return ApiBase() + pathAndQuery + sep + "b=" + id;
+        }
+
+        static void PushBoard(Board b)
+        {
+            try
+            {
+                string url = Store.BoardUrl("/api/b/sync");
+                if (url == null) return;
+                var ser = new JavaScriptSerializer();
+                ser.MaxJsonLength = 8 * 1024 * 1024;
+                string payload = ser.Serialize(new Dictionary<string, object>
+                {
+                    { "tasks", b.Tasks },
+                    { "mode", b.Mode }
+                });
+                Store.HttpJsonTimeout(url, payload, 6000);
+            }
+            catch (Exception) { }
         }
 
         public static T Mutate<T>(Func<Board, T> fn)
@@ -440,6 +521,201 @@ namespace NexusBoard.Cli
 
     public static class Cli
     {
+        static string ArgText(string v)
+        {
+            if (string.IsNullOrEmpty(v)) return null;
+            string t = v.Trim();
+            if (t.StartsWith("@"))
+            {
+                string f = t.Substring(1);
+                try { return File.ReadAllText(f, Encoding.UTF8); }
+                catch (Exception e) { throw new IOException("не прочитать " + f + ": " + e.Message); }
+            }
+            return v;
+        }
+
+        static Dictionary<string, object> BodyOf(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return new Dictionary<string, object>();
+            string t = ArgText(raw);
+            try
+            {
+                var o = new JavaScriptSerializer().DeserializeObject(t) as Dictionary<string, object>;
+                if (o != null) return o;
+            }
+            catch (Exception) { }
+            return new Dictionary<string, object> { { "text", t } };
+        }
+
+        static Dictionary<string, object> SourceOf(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            string path = raw.Trim();
+            int lines = 40;
+            int i = path.LastIndexOf(':');
+            if (i > 2)
+            {
+                int n;
+                if (int.TryParse(path.Substring(i + 1), out n) && n > 0)
+                {
+                    lines = Math.Min(400, n);
+                    path = path.Substring(0, i);
+                }
+            }
+            return new Dictionary<string, object> { { "path", path }, { "lines", lines } };
+        }
+
+        static int ViewCmd(string cmd, Dictionary<string, string> d)
+        {
+            string url = Store.BoardUrl("/api/b/view/set");
+            if (url == null) { Out("ERR нет ключа доски: открой приложение → Ключ"); return 2; }
+            string id = cmd == "view-del" ? Get(d, "view-del")
+                : cmd == "view-set" ? (Get(d, "view-set") ?? Get(d, "id"))
+                : Get(d, "id");
+            string addTitle = cmd == "view-add" ? Get(d, "view-add") : null;
+            if (cmd == "view-del")
+            {
+                if (string.IsNullOrWhiteSpace(id)) { Out("ERR нужен id: --view-del <id>"); return 2; }
+                try
+                {
+                    string r = Store.HttpJsonTimeout(Store.BoardUrl("/api/b/view/del"), new JavaScriptSerializer().Serialize(
+                        new Dictionary<string, object> { { "id", id.Trim() } }), 8000);
+                    var o = new JavaScriptSerializer().DeserializeObject(r) as Dictionary<string, object>;
+                    bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                    Out(ok ? "OK удалён " + id : "ERR " + r);
+                    return ok ? 0 : 1;
+                }
+                catch (Exception e) { Out("ERR " + e.Message); return 1; }
+            }
+            var payload = new Dictionary<string, object>();
+            if (!string.IsNullOrWhiteSpace(id)) payload["id"] = id.Trim();
+            string kind = Get(d, "kind");
+            if (!string.IsNullOrWhiteSpace(kind)) payload["kind"] = kind.Trim();
+            string title = Get(d, "title") ?? addTitle;
+            if (!string.IsNullOrWhiteSpace(title)) payload["title"] = title.Trim();
+            string order = Get(d, "order");
+            if (!string.IsNullOrWhiteSpace(order)) payload["order"] = IntOf(order, 0);
+            string size = Get(d, "size");
+            if (!string.IsNullOrWhiteSpace(size)) payload["size"] = size.Trim();
+            string bodyRaw = Get(d, "body");
+            if (bodyRaw != null) payload["body"] = BodyOf(bodyRaw);
+            var src = SourceOf(Get(d, "source"));
+            if (src != null) payload["source"] = src;
+            if (!payload.ContainsKey("kind") && !payload.ContainsKey("id")) payload["kind"] = "text";
+            try
+            {
+                string r = Store.HttpJsonTimeout(url, new JavaScriptSerializer().Serialize(payload), 10000);
+                var o = new JavaScriptSerializer().DeserializeObject(r) as Dictionary<string, object>;
+                bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                if (!ok) { Out("ERR " + r); return 1; }
+                var blk = o["block"] as Dictionary<string, object>;
+                Out("OK " + (blk != null && blk.ContainsKey("id") ? Convert.ToString(blk["id"]) : ""));
+                return 0;
+            }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+        }
+
+        static int ViewListCmd(bool json)
+        {
+            string url = Store.BoardUrl("/api/b/views");
+            if (url == null) { Out("ERR нет ключа доски: открой приложение → Ключ"); return 2; }
+            string raw;
+            try { raw = Store.HttpJsonTimeout(url, null, 10000); }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+            if (json) { Out(raw); return 0; }
+            var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+            if (o == null || !o.ContainsKey("blocks")) { Out("ERR " + raw); return 1; }
+            var list = o["blocks"] as object[];
+            if (list == null || list.Length == 0) { Out("разделов нет"); return 0; }
+            foreach (var it in list)
+            {
+                var b = it as Dictionary<string, object>;
+                if (b == null) continue;
+                Out(Convert.ToString(b["id"]) + "  " + Convert.ToString(b["kind"]) + "  " + Convert.ToString(b["title"]));
+            }
+            return 0;
+        }
+
+        static int CodePushCmd(Dictionary<string, string> d)
+        {
+            string id = Get(d, "code-push");
+            string file = Get(d, "file");
+            string content = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(file)) content = File.ReadAllText(file.Trim(), Encoding.UTF8);
+                else content = Console.In.ReadToEnd();
+            }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+            if (string.IsNullOrWhiteSpace(content)) { Out("ERR пустой текст: --file <путь> или stdin"); return 2; }
+            string title = Get(d, "title") ?? "код";
+            string lang = Get(d, "lang") ?? "diff";
+            string filename = Get(d, "name") ?? (string.IsNullOrWhiteSpace(file) ? "" : Path.GetFileName(file.Trim()));
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                string url = Store.BoardUrl("/api/b/view/set");
+                if (url == null) { Out("ERR нет ключа доски"); return 2; }
+                var payload = new Dictionary<string, object>
+                {
+                    { "kind", "code" },
+                    { "title", title },
+                    { "size", "wide" },
+                    { "body", new Dictionary<string, object> { { "lang", lang }, { "filename", filename }, { "content", content } } }
+                };
+                try
+                {
+                    string r = Store.HttpJsonTimeout(url, new JavaScriptSerializer().Serialize(payload), 15000);
+                    var o = new JavaScriptSerializer().DeserializeObject(r) as Dictionary<string, object>;
+                    var blk = o != null && o.ContainsKey("block") ? o["block"] as Dictionary<string, object> : null;
+                    Out("OK " + (blk != null ? Convert.ToString(blk["id"]) : ""));
+                    return 0;
+                }
+                catch (Exception e) { Out("ERR " + e.Message); return 1; }
+            }
+            string saveUrl = Store.BoardUrl("/api/b/code/save");
+            var body = new Dictionary<string, object> { { "id", id.Trim() }, { "content", content }, { "title", title } };
+            string ifv = Get(d, "if-version");
+            if (!string.IsNullOrWhiteSpace(ifv)) body["ifVersion"] = IntOf(ifv, 0);
+            try
+            {
+                string r = Store.HttpJsonTimeout(saveUrl, new JavaScriptSerializer().Serialize(body), 15000);
+                var o = new JavaScriptSerializer().DeserializeObject(r) as Dictionary<string, object>;
+                bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                if (!ok) { Out("ERR " + r); return 1; }
+                Out("OK v" + Convert.ToString(o["version"]) + " sha=" + Convert.ToString(o["sha"]));
+                return 0;
+            }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+        }
+
+        static int CodePullCmd(Dictionary<string, string> d)
+        {
+            string id = Get(d, "code-pull");
+            if (string.IsNullOrWhiteSpace(id)) { Out("ERR нужен id: --code-pull <id> [--out файл]"); return 2; }
+            string url = Store.BoardUrl("/api/b/code?id=" + id.Trim());
+            if (url == null) { Out("ERR нет ключа доски"); return 2; }
+            try
+            {
+                string raw = Store.HttpJsonTimeout(url, null, 15000);
+                var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                var code = o != null && o.ContainsKey("code") ? o["code"] as Dictionary<string, object> : null;
+                if (code == null) { Out("ERR " + raw); return 1; }
+                string content = Convert.ToString(code["content"]);
+                string outFile = Get(d, "out");
+                if (!string.IsNullOrWhiteSpace(outFile))
+                {
+                    File.WriteAllText(outFile.Trim(), content, new UTF8Encoding(false));
+                    Out("OK " + outFile.Trim() + " v" + Convert.ToString(code["version"]));
+                }
+                else
+                {
+                    Out(content);
+                }
+                return 0;
+            }
+            catch (Exception e) { Out("ERR " + e.Message); return 1; }
+        }
+
         static Dictionary<string, string> Parse(string[] args)
         {
             var d = new Dictionary<string, string>();
@@ -585,6 +861,20 @@ namespace NexusBoard.Cli
                         if (string.IsNullOrWhiteSpace(text)) text = Get(d, "_positional").Replace("", " ");
                         return ChatSayCmd(text, Get(d, "board"));
                     }
+
+                case "view-list":
+                    return ViewListCmd(d.ContainsKey("json"));
+
+                case "view-add":
+                case "view-set":
+                case "view-del":
+                    return ViewCmd(cmd, d);
+
+                case "code-push":
+                    return CodePushCmd(d);
+
+                case "code-pull":
+                    return CodePullCmd(d);
 
                 case "help":
                 case "h":
@@ -828,7 +1118,14 @@ namespace NexusBoard.Cli
                 "Nexus Board — доска задач ИИ",
                 "",
                 "GUI:            NexusBoard.exe            (двойной клик)",
-                "Окно поднимается само при первой же задаче из CLI.",
+                "Окно открывает только --open (или двойной клик).",
+                "",
+                "Разделы, которые ИИ рисует сам:",
+                "  --view-add \"Обучение\" --kind progress --body \"{\\\"value\\\":82}\"",
+                "  --view-set <id> --body \"@file.json\"   [--title ...] [--order 10] [--size md|wide]",
+                "  --view-del <id> / --view-list [--json]",
+                "  --code-push [<id>] --title \"Патч\" --file E:\\patch.diff [--lang diff]",
+                "  --code-pull <id> [--out E:\\patch.diff]",
                 "",
                 "Поставить задачу:",
                 "  --add \"текст\" [--mode night|auto|task] [--note \"...\"] [--prio 1-5]",

@@ -36,6 +36,8 @@ Android 7+. The APK updates itself; the board and training screens refresh every
 
 ## What it does
 
+- **Sections the AI builds itself** — not just tasks: a metric with a caption, a progress bar, status lights, text, **the tail of any log file on the PC** (the server reads the file), links, a chart, and **code**. One CLI call adds a section and it shows up on the PC, the phone and the site at once. A client that does not know a kind simply skips it: nothing breaks, nothing is deleted.
+- **Code from the PC to the phone** — a `code` block is pulled to the device, an edit can be pushed back with an optimistic version check (`409 conflict` instead of a silent overwrite).
 - **Columns** Now / Next / Waiting / Done, notes, mode, percentages.
 - **Section tabs** — “Training”, “Sales”, “Home”. Your AI creates them through the API or you add them with the “+ section” button; they appear on phone and PC at once.
 - **Clean interface**: the main view is just the board and a `⋯` menu. F5 — refresh, Ctrl+N — new task, Ctrl+Alt+S — settings.
@@ -102,6 +104,19 @@ NexusBoard.exe --chat-say "reply"
 - Android: `gradle assembleRelease` (Gradle 8.10, minSdk 24), APK in `app/build/outputs/apk/release/`.
 - PC: `pc\build.cmd` (csc from .NET Framework 4.7), installer: `pc\setup\build.cmd`.
 - Server: `node server/server.js` (port 8788, key in `server/token.txt`).
+
+## Sections the AI builds
+
+```bash
+NexusBoard.exe --view-add "Training" --kind progress --body '{"value":82,"label":"ada-v6"}'
+NexusBoard.exe --view-set <id> --body "@file.json" [--title ...] [--order 10] [--size md|wide]
+NexusBoard.exe --view-del <id> / --view-list [--json]
+NexusBoard.exe --code-push [<id>] --title "Patch" --file E:\patch.diff [--lang diff]
+NexusBoard.exe --code-pull <id> [--out E:\patch.diff]
+```
+
+Kinds and the API: `docs/views.md`. Every CLI write is synced to the server (`/api/b/sync`), so the board
+in the app and in scripts is the same one. Unknown kinds are skipped by clients — updates never break data.
 
 ## License
 

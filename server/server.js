@@ -45,6 +45,135 @@ function readTasks() {
   }
 }
 
+const VIEW_KINDS = ["metric", "progress", "status", "text", "log", "links", "chart", "code", "tasks", "activity", "note"];
+
+function tailLines(file, count) {
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile() || st.size > 64 * 1024 * 1024) return { error: "not a text file" };
+    const want = Math.max(1, Math.min(400, Number(count) || 40));
+    const len = Math.min(st.size, 131072);
+    const buf = Buffer.alloc(len);
+    const fd = fs.openSync(file, "r");
+    fs.readSync(fd, buf, 0, len, st.size - len);
+    fs.closeSync(fd);
+    let text = buf.toString("utf8");
+    if (st.size > len) {
+      const nl = text.indexOf("\n");
+      if (nl >= 0) text = text.slice(nl + 1);
+    }
+    const lines = text.split(/\r?\n/);
+    return { lines: lines.slice(-want), size: st.size, mtime: st.mtime.toISOString() };
+  } catch (e) {
+    return { error: String(e.message || e) };
+  }
+}
+
+function bodySize(o) {
+  try {
+    return JSON.stringify(o).length;
+  } catch (e) {
+    return 0;
+  }
+}
+
+function cleanView(payload, prev) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  const base = prev || {};
+  const prevBody = base.body && typeof base.body === "object" ? base.body : {};
+  let kind = String(p.kind || base.kind || "text").toLowerCase().replace(/[^a-z]/g, "").slice(0, 16);
+  if (!kind) kind = "text";
+  const id = String(p.id || base.id || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32) ||
+    "v" + crypto.randomBytes(4).toString("hex");
+  let body = p.body !== undefined ? p.body : base.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (e) {
+      body = { text: String(body).slice(0, 8000) };
+    }
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
+  if (bodySize(body) > 65536) body = { text: JSON.stringify(body).slice(0, 60000), truncated: true };
+  const size = ["sm", "md", "wide"].includes(String(p.size || base.size)) ? String(p.size || base.size) : "sm";
+  const out = {
+    id,
+    kind: VIEW_KINDS.includes(kind) ? kind : "text",
+    title: String(p.title != null ? p.title : base.title || "").slice(0, 80),
+    order: Number(p.order != null ? p.order : base.order || 0) || 0,
+    size,
+    updated: new Date().toISOString(),
+  };
+  if (out.kind === "code") {
+    const content = String(body.content != null ? body.content : prevBody.content || "").slice(0, 200000);
+    out.body = {
+      lang: String(body.lang || prevBody.lang || "text").slice(0, 16),
+      filename: String(body.filename || prevBody.filename || "").slice(0, 120),
+      content,
+      version: Number(prevBody.version) || 1,
+      sha: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
+    };
+  } else {
+    out.body = body;
+  }
+  const src = p.source && typeof p.source === "object" ? p.source : base.source;
+  if (src && src.path) {
+    out.source = { path: String(src.path).slice(0, 400), lines: Math.max(1, Math.min(400, Number(src.lines) || 40)) };
+    if (out.kind === "log" && !out.body.path) out.body.path = out.source.path;
+  }
+  if (!out.title) out.title = out.kind;
+  return out;
+}
+
+const syncTask = (t) => ({
+  Id: String((t && (t.Id || t.id)) || "").slice(0, 40),
+  Title: String((t && (t.Title || t.title)) || "").slice(0, 300),
+  Note: String((t && (t.Note || t.note)) || "").slice(0, 2000),
+  Mode: ["auto", "task", "night"].includes(String(t && (t.Mode || t.mode))) ? String(t.Mode || t.mode) : "task",
+  Status: ["todo", "doing", "blocked", "done"].includes(String(t && (t.Status || t.status)))
+    ? String(t.Status || t.status) : "todo",
+  Progress: Math.max(0, Math.min(100, Number(t && (t.Progress != null ? t.Progress : t.progress)) || 0)),
+  Section: String((t && (t.Section || t.section)) || "").slice(0, 24),
+  Priority: Math.max(1, Math.min(5, Number(t && (t.Priority != null ? t.Priority : t.priority)) || 3)),
+  Source: String((t && (t.Source || t.source)) || "ai").slice(0, 16),
+  Created: String((t && (t.Created || t.created)) || new Date().toISOString()).slice(0, 32),
+  Updated: String((t && (t.Updated || t.updated)) || new Date().toISOString()).slice(0, 32),
+});
+
+function ownerSettings() {
+  try {
+    const file = path.join(process.env.APPDATA || "", "NexusBoard", "settings.json");
+    return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
+  } catch (e) {
+    return null;
+  }
+}
+
+function ownerBoard() {
+  const st = ownerSettings();
+  const id = st && String(st.Board || "");
+  if (!id || !/^[a-f0-9]{16}$/.test(id)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "boards", id + ".json"), "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
+function boardBlocks(board) {
+  const blocks = Array.isArray(board && board.blocks) ? board.blocks : [];
+  return blocks
+    .map((b) => {
+      const copy = JSON.parse(JSON.stringify(b));
+      if (copy.kind === "log") {
+        const p = (copy.source && copy.source.path) || (copy.body && copy.body.path);
+        if (p) copy.tail = tailLines(p, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+      }
+      return copy;
+    })
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
 const FINETUNE = process.env.NEXUS_FINETUNE || "D:\\finetune";
 
 function tailText(file, bytes) {
@@ -362,6 +491,168 @@ const server = http.createServer((req, res) => {
       return json(res, 200, { ok: true, sections: data.sections || [] });
     }
 
+    const viewsOf = (data) => {
+      data.blocks = Array.isArray(data.blocks) ? data.blocks : [];
+      return data.blocks;
+    };
+    const findView = (data, id) => viewsOf(data).find((b) => b && b.id === id);
+
+    if (url === "/api/b/views" && req.method === "GET") {
+      const data = load();
+      const blocks = viewsOf(data).map((b) => {
+        const copy = JSON.parse(JSON.stringify(b));
+        if (copy.kind === "log") {
+          const p = (copy.source && copy.source.path) || (copy.body && copy.body.path);
+          if (p) copy.tail = tailLines(p, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+        }
+        return copy;
+      });
+      blocks.sort((a, b) => (a.order || 0) - (b.order || 0));
+      const version = crypto.createHash("sha1").update(JSON.stringify(blocks)).digest("hex").slice(0, 12);
+      return json(res, 200, { ok: true, version, blocks });
+    }
+
+    if (url === "/api/b/view/set" && req.method === "POST") {
+      return body().then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        const data = load();
+        const blocks = viewsOf(data);
+        const id = String(payload.id || "").replace(/[^a-zA-Z0-9_-]/g, "");
+        const prev = id ? findView(data, id) : null;
+        if (!prev && blocks.length >= 40) return json(res, 400, { ok: false, error: "too many blocks" });
+        const block = cleanView(payload, prev);
+        if (prev) {
+          const i = blocks.indexOf(prev);
+          blocks[i] = block;
+        } else {
+          blocks.push(block);
+        }
+        save(data);
+        return json(res, 200, { ok: true, block });
+      });
+    }
+
+    if (url === "/api/b/view/del" && req.method === "POST") {
+      return body().then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        const data = load();
+        const blocks = viewsOf(data);
+        const id = String(payload.id || "");
+        const before = blocks.length;
+        data.blocks = blocks.filter((b) => !b || b.id !== id);
+        if (data.blocks.length === before) return json(res, 404, { ok: false, error: "block not found" });
+        save(data);
+        return json(res, 200, { ok: true, blocks: data.blocks });
+      });
+    }
+
+    if (url === "/api/b/sync" && req.method === "POST") {
+      return body().then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        if (!Array.isArray(payload.tasks)) return json(res, 400, { ok: false, error: "tasks[] required" });
+        const data = load();
+        viewsOf(data);
+        data.tasks = payload.tasks.slice(0, 400).map(syncTask).filter((t) => t.Title);
+        if (Array.isArray(payload.sections)) {
+          data.sections = payload.sections.slice(0, 20).map((sec, i) => ({
+            id: String((sec && sec.id) || "s" + i).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 24),
+            name: String((sec && sec.name) || "").slice(0, 60),
+            order: Number((sec && sec.order) != null ? sec.order : i) || i,
+          })).filter((sec) => sec.name);
+        }
+        if (payload.mode) data.mode = String(payload.mode).slice(0, 12);
+        save(data);
+        return json(res, 200, {
+          ok: true,
+          tasks: data.tasks.length,
+          sections: (data.sections || []).length,
+          blocks: viewsOf(data).length,
+          updated: data.updated,
+        });
+      });
+    }
+
+    if (url === "/api/b/code" && req.method === "GET") {
+      const data = load();
+      const id = String(parsed.searchParams.get("id") || "");
+      const b = findView(data, id);
+      if (!b || !b.body || typeof b.body.content !== "string") {
+        return json(res, 404, { ok: false, error: "code block not found" });
+      }
+      const content = b.body.content;
+      return json(res, 200, {
+        ok: true,
+        code: {
+          id: b.id,
+          title: b.title || "",
+          lang: b.body.lang || "text",
+          filename: b.body.filename || "",
+          content,
+          version: Number(b.body.version) || 1,
+          sha: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
+          updated: b.updated || "",
+        },
+      });
+    }
+
+    if (url === "/api/b/code/save" && req.method === "POST") {
+      return body().then((raw) => {
+        let payload = {};
+        try {
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          return json(res, 400, { ok: false, error: "bad json" });
+        }
+        const data = load();
+        const id = String(payload.id || "");
+        const b = findView(data, id);
+        if (!b || !b.body || typeof b.body.content !== "string") {
+          return json(res, 404, { ok: false, error: "code block not found" });
+        }
+        const current = Number(b.body.version) || 1;
+        const currentSha = crypto.createHash("sha256").update(b.body.content).digest("hex").slice(0, 16);
+        const ifVersion = payload.ifVersion != null ? Number(payload.ifVersion) : null;
+        if (ifVersion != null && ifVersion !== current) {
+          return json(res, 409, {
+            ok: false,
+            error: "conflict",
+            version: current,
+            sha: currentSha,
+            content: b.body.content,
+          });
+        }
+        const content = String(payload.content == null ? "" : payload.content).slice(0, 200000);
+        if (!content.trim()) return json(res, 400, { ok: false, error: "content required" });
+        const sha = crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+        const version = current + 1;
+        b.body.history = (Array.isArray(b.body.history) ? b.body.history : [])
+          .concat([{ version: current, sha: currentSha, ts: new Date().toISOString() }])
+          .slice(-5);
+        b.body.content = content;
+        b.body.version = version;
+        b.body.sha = sha;
+        if (payload.title) b.title = String(payload.title).slice(0, 80);
+        b.updated = new Date().toISOString();
+        save(data);
+        return json(res, 200, { ok: true, version, sha, updated: b.updated });
+      });
+    }
+
     if ((url === "/api/b/add" || url === "/api/b/update" || url === "/api/b/clear" ||
          url === "/api/b/section/add" || url === "/api/b/section/del") && req.method === "POST") {
       return body().then((raw) => {
@@ -568,6 +859,30 @@ const server = http.createServer((req, res) => {
     } catch (e) {
       return json(res, 500, { ok: false, error: String(e.message || e) });
     }
+  }
+  if (url === "/api/views") {
+    const board = ownerBoard();
+    if (!board) return json(res, 200, { ok: false, blocks: [], error: "no board key" });
+    return json(res, 200, { ok: true, version: board.updated || "", blocks: boardBlocks(board) });
+  }
+  if (url === "/api/code") {
+    const board = ownerBoard();
+    const id = String(parsed.searchParams.get("id") || "");
+    const b = (board && Array.isArray(board.blocks) ? board.blocks : []).find((x) => x && x.id === id);
+    if (!b || !b.body || typeof b.body.content !== "string") {
+      return json(res, 404, { ok: false, error: "code block not found" });
+    }
+    return json(res, 200, {
+      ok: true,
+      code: {
+        id: b.id,
+        title: b.title || "",
+        lang: b.body.lang || "text",
+        filename: b.body.filename || "",
+        content: b.body.content,
+        version: Number(b.body.version) || 1,
+      },
+    });
   }
   if (url === "/api/tasks") return json(res, 200, readTasks());
   if (url === "/api/activity") return json(res, 200, readActivity(40));

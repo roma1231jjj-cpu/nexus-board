@@ -43,6 +43,29 @@
   .dot.stale{background:var(--amber);box-shadow:0 0 0 3px #fbbf2422}
   .stats{display:flex;gap:22px;color:var(--dim);font-size:13px;padding-bottom:2px}
   .stats span b{color:var(--text);font-weight:600;margin-right:4px}
+  .views{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;margin:0 0 22px}
+  .vcard{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px 16px;
+    box-shadow:0 20px 50px -40px #000}
+  .vhead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .vhead b{font-size:13px;font-weight:600;color:var(--text);letter-spacing:-.1px}
+  .vtag{margin-left:auto;font-size:10px;letter-spacing:.6px;color:var(--faint);text-transform:uppercase}
+  .vbig{font-size:26px;font-weight:700;color:var(--accent-soft);letter-spacing:-.6px}
+  .vsub{font-size:12px;color:var(--dim);margin-top:4px}
+  .vrow{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--text)}
+  .vrow i{width:7px;height:7px;border-radius:50%;background:var(--slate);flex:none}
+  .vrow i.ok{background:var(--green)} .vrow i.warn{background:var(--amber)} .vrow i.err{background:var(--red)}
+  .vrow span{margin-left:auto;color:var(--dim);font-size:12px}
+  .vbar{height:8px;border-radius:5px;background:var(--border);overflow:hidden;margin-top:10px}
+  .vbar div{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-soft))}
+  .vtext{font-size:13px;color:var(--dim);white-space:pre-wrap;line-height:1.5}
+  .vlog{font:11.5px/1.5 "Cascadia Mono",Consolas,monospace;color:var(--dim);background:#0B0913;
+    border:1px solid var(--border);border-radius:10px;padding:10px;max-height:180px;overflow:auto;white-space:pre-wrap}
+  .vlink{display:block;font-size:13px;color:var(--accent-soft);text-decoration:none;padding:4px 0}
+  .vlink:hover{text-decoration:underline}
+  .vcode-btn{border:1px solid var(--border);background:#0F0C1A;color:var(--text);border-radius:9px;
+    padding:6px 12px;font:inherit;font-size:12px;cursor:pointer}
+  .vcode-pre{font:11.5px/1.5 "Cascadia Mono",Consolas,monospace;color:var(--dim);background:#0B0913;
+    border:1px solid var(--border);border-radius:10px;padding:10px;max-height:220px;overflow:auto;white-space:pre;margin:10px 0 0}
   .board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;align-items:start}
   @media (max-width:1080px){.board{grid-template-columns:repeat(2,minmax(0,1fr))}}
   @media (max-width:640px){.board{grid-template-columns:1fr}.wrap{padding:18px}}
@@ -96,6 +119,7 @@
     <div class="pill"><span class="dot" id="dot"></span><span data-i18n="modeWord">режим</span> <b id="mode">—</b></div>
     <button id="langBtn" style="border:1px solid var(--border);background:#0F0C1A;color:var(--dim);border-radius:10px;padding:6px 11px;font:inherit;font-size:12.5px;cursor:pointer">EN</button>
   </header>
+  <div id="views" class="views"></div>
   <div id="board" class="board"></div>
   <details>
     <summary data-i18n="feedTitle">Лента событий (последние 40)</summary>
@@ -224,6 +248,83 @@ function render(d){
   }).join("");
 }
 
+
+function vEsc(v){ return esc(v == null ? "" : String(v)); }
+
+function vCard(b){
+  const body = b.body || {};
+  const title = vEsc(b.title || b.kind);
+  const head = `<div class="vhead"><b>${title}</b><span class="vtag">${vEsc(b.kind)}</span></div>`;
+  if (b.kind === "metric"){
+    return `<div class="vcard">${head}<div class="vbig">${vEsc(body.value)} ${vEsc(body.unit)}</div>
+      <div class="vsub">${vEsc(body.sub)}</div></div>`;
+  }
+  if (b.kind === "progress"){
+    const pct = Math.max(0, Math.min(100, Number(body.value) || 0));
+    return `<div class="vcard">${head}<div class="vsub">${vEsc(body.label)}</div>
+      <div class="vbar"><div style="width:${pct}%"></div></div>
+      <div class="vsub" style="display:flex"><span>${pct}%</span><span style="margin-left:auto">${vEsc(body.eta)}</span></div></div>`;
+  }
+  if (b.kind === "status"){
+    const items = Array.isArray(body.items) ? body.items : [];
+    return `<div class="vcard">${head}${items.map(it =>
+      `<div class="vrow"><i class="${vEsc(it.state || "")}"></i>${vEsc(it.label)}<span>${vEsc(it.note)}</span></div>`).join("")}</div>`;
+  }
+  if (b.kind === "text"){
+    return `<div class="vcard">${head}<div class="vtext">${vEsc(body.text)}</div></div>`;
+  }
+  if (b.kind === "log"){
+    const lines = b.tail && Array.isArray(b.tail.lines) ? b.tail.lines.slice(-14) : [];
+    const text = lines.length ? lines.join("\n") : (b.tail && b.tail.error ? vEsc(b.tail.error) : "—");
+    return `<div class="vcard">${head}<div class="vlog">${vEsc(text)}</div></div>`;
+  }
+  if (b.kind === "links"){
+    const items = Array.isArray(body.items) ? body.items : [];
+    return `<div class="vcard">${head}${items.map(it =>
+      `<a class="vlink" href="${vEsc(it.url)}" target="_blank" rel="noopener">${vEsc(it.label)}${it.note ? " · " + vEsc(it.note) : ""}</a>`).join("")}</div>`;
+  }
+  if (b.kind === "code"){
+    return `<div class="vcard">${head}<div class="vsub">${vEsc(body.filename)} · v${vEsc(body.version)}</div>
+      <button class="vcode-btn" data-code="${vEsc(b.id)}">показать код</button>
+      <pre class="vcode-pre" id="code-${vEsc(b.id)}" hidden></pre></div>`;
+  }
+  if (b.kind === "tasks" || b.kind === "activity"){
+    return `<div class="vcard">${head}<div class="vsub">${b.kind === "tasks"
+      ? t("inPlan") + " / " + t("inWork") + " / " + t("closed")
+      : t("feedTitle")}</div></div>`;
+  }
+  return "";
+}
+
+function renderViews(list){
+  const host = document.getElementById("views");
+  const cards = (list || []).map(vCard).filter(Boolean);
+  host.innerHTML = cards.join("");
+  host.querySelectorAll("button[data-code]").forEach(btn => {
+    btn.onclick = async () => {
+      const id = btn.getAttribute("data-code");
+      const pre = document.getElementById("code-" + id);
+      if (!pre.hidden){ pre.hidden = true; btn.textContent = "показать код"; return; }
+      btn.textContent = "…";
+      try{
+        const r = await fetch("/api/code?id=" + encodeURIComponent(id), {cache:"no-store"});
+        const d = await r.json();
+        pre.textContent = (d.code && d.code.content) || "—";
+        pre.hidden = false;
+        btn.textContent = "скрыть код";
+      }catch(e){ btn.textContent = "ошибка"; }
+    };
+  });
+}
+
+async function viewsTick(){
+  try{
+    const r = await fetch("/api/views", {cache:"no-store"});
+    const d = await r.json();
+    renderViews(d.blocks || []);
+  }catch(e){}
+}
+
 async function tick(){
   try{
     const r = await fetch("/api/tasks", {cache:"no-store"});
@@ -256,10 +357,12 @@ document.getElementById("langBtn").onclick = () => {
   applyStatic();
   tick();
   feed();
+  viewsTick();
 };
-tick(); feed();
+tick(); feed(); viewsTick();
 setInterval(tick, 2000);
 setInterval(feed, 6000);
+setInterval(viewsTick, 5000);
 </script>
 </body>
 </html>

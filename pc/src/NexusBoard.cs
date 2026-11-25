@@ -21,7 +21,7 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.0.5";
+        public const string Version = "2.1.0";
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
@@ -33,7 +33,8 @@ namespace NexusBoard
         {
             string[] cliVerbs = { "--add", "--plan", "--start", "--doing", "--done", "--block", "--blocked",
                 "--todo", "--drop", "--dropped", "--progress", "--note", "--log", "--mode", "--clear",
-                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest", "--chat-list", "--chat", "--chat-say" };
+                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest", "--chat-list", "--chat", "--chat-say",
+                "--view-add", "--view-set", "--view-del", "--view-list", "--code-push", "--code-pull", "--sync" };
             if (args.Length >= 1 && Array.IndexOf(cliVerbs, args[0]) >= 0)
             {
                 AttachConsole(-1);
@@ -249,6 +250,164 @@ namespace NexusBoard
         }
     }
 
+
+    class CodeDialog : Form
+    {
+        readonly Api api;
+        readonly string board;
+        readonly string id;
+        readonly Theme th;
+        TextBox box;
+        Label meta;
+        Button pullBtn;
+        int version = 1;
+
+        public CodeDialog(Api api, string board, Theme th, string id, string title)
+        {
+            this.api = api;
+            this.board = board;
+            this.th = th;
+            this.id = id;
+            Text = string.IsNullOrEmpty(title) ? "Nexus · код" : "Nexus · " + title;
+            Width = 980;
+            Height = 720;
+            MinimumSize = new Size(640, 460);
+            StartPosition = FormStartPosition.CenterParent;
+            BackColor = th.Back;
+            ForeColor = th.Text;
+            Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular);
+
+            box = new TextBox
+            {
+                Multiline = true,
+                ScrollBars = ScrollBars.Both,
+                WordWrap = false,
+                AcceptsTab = true,
+                BorderStyle = BorderStyle.None,
+                BackColor = th.Name == "frost" ? Color.FromArgb(248, 249, 253) : Color.FromArgb(12, 10, 20),
+                ForeColor = th.Text,
+                Font = FontCache.Get("Consolas", 10f, FontStyle.Regular),
+                Dock = DockStyle.Fill
+            };
+            var host = new Panel { Dock = DockStyle.Fill, Padding = new Padding(18, 12, 18, 8), BackColor = th.Back };
+            host.Controls.Add(box);
+
+            var bar = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = th.Back };
+            meta = new Label
+            {
+                AutoSize = false,
+                Width = 420,
+                Height = 40,
+                Location = new Point(18, 16),
+                ForeColor = th.Dim,
+                BackColor = Color.Transparent,
+                Font = FontCache.Get("Consolas", 9f, FontStyle.Regular),
+                Text = "…"
+            };
+            bar.Controls.Add(meta);
+            pullBtn = MkButton("забрать", 470, (s2, e2) => Pull());
+            bar.Controls.Add(pullBtn);
+            bar.Controls.Add(MkButton("сохранить", 610, (s2, e2) => Save()));
+            bar.Controls.Add(MkButton("закрыть", 750, (s2, e2) => Close()));
+
+            Controls.Add(host);
+            Controls.Add(bar);
+            Shown += (s2, e2) => Pull();
+        }
+
+        Button MkButton(string text, int x, EventHandler click)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Size = new Size(130, 36),
+                Location = new Point(x, 14),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = th.Card,
+                ForeColor = th.Text,
+                Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            b.FlatAppearance.BorderColor = th.Line;
+            b.Click += click;
+            return b;
+        }
+
+        void Pull()
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var o = api.CodeGet(board, id);
+                    var code = o != null && o.ContainsKey("code") ? o["code"] as Dictionary<string, object> : null;
+                    if (code == null) return;
+                    string content = Convert.ToString(code["content"]);
+                    int ver = Convert.ToInt32(code["version"]);
+                    string sha = Convert.ToString(code["sha"]);
+                    BeginInvoke((Action)(() =>
+                    {
+                        version = ver;
+                        box.Text = content;
+                        meta.Text = "v" + ver + "  sha=" + sha;
+                        pullBtn.Text = "забрать v" + ver;
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke((Action)(() => meta.Text = "ERR " + ex.Message));
+                }
+            });
+        }
+
+        void Save()
+        {
+            string content = box.Text;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                string raw;
+                try { raw = api.CodeSave(board, id, content, version); }
+                catch (Exception ex)
+                {
+                    BeginInvoke((Action)(() => meta.Text = "ERR " + ex.Message));
+                    return;
+                }
+                var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
+                if (ok)
+                {
+                    int ver = Convert.ToInt32(o["version"]);
+                    string sha = Convert.ToString(o["sha"]);
+                    BeginInvoke((Action)(() =>
+                    {
+                        version = ver;
+                        meta.Text = "сохранено: v" + ver + "  sha=" + sha;
+                        pullBtn.Text = "забрать v" + ver;
+                    }));
+                    return;
+                }
+                string err = o != null && o.ContainsKey("error") ? Convert.ToString(o["error"]) : raw;
+                if (err == "conflict")
+                {
+                    string fresh = o.ContainsKey("content") ? Convert.ToString(o["content"]) : "";
+                    int ver = o.ContainsKey("version") ? Convert.ToInt32(o["version"]) : version;
+                    BeginInvoke((Action)(() =>
+                    {
+                        MessageBox.Show(this,
+                            "На сервере уже более новая версия (v" + ver + ").\nСейчас подтяну её — свою правку скопируй заранее.",
+                            "Nexus · конфликт версий", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        version = ver;
+                        if (!string.IsNullOrEmpty(fresh)) box.Text = fresh;
+                        meta.Text = "конфликт: подтянул v" + ver;
+                        pullBtn.Text = "забрать v" + ver;
+                    }));
+                    return;
+                }
+                BeginInvoke((Action)(() => meta.Text = "ERR " + err));
+            });
+        }
+    }
+
     static class FontCache
     {
         static readonly System.Collections.Generic.Dictionary<string, Font> map =
@@ -391,6 +550,7 @@ namespace NexusBoard
             { "err", new[] { "Ошибка", "Error" } },
             { "tab_board", new[] { "Доска", "Board" } },
             { "tab_train", new[] { "Обучение", "Training" } },
+            { "tab_views", new[] { "Разделы", "Sections" } },
             { "tab_chat", new[] { "Чат", "Chat" } },
             { "chat_hint", new[] { "Написать ИИ…", "Message the AI…" } },
             { "chat_send", new[] { "Отправить", "Send" } },
@@ -514,6 +674,41 @@ namespace NexusBoard
             Post("/api/c/send", new JavaScriptSerializer().Serialize(d));
         }
 
+        public Dictionary<string, object> Views(string board)
+        {
+            return new JavaScriptSerializer().DeserializeObject(Get("/api/b/views?b=" + board)) as Dictionary<string, object>;
+        }
+
+        public Dictionary<string, object> CodeGet(string board, string id)
+        {
+            return new JavaScriptSerializer().DeserializeObject(Get("/api/b/code?b=" + board + "&id=" + id)) as Dictionary<string, object>;
+        }
+
+        public string CodeSave(string board, string id, string content, int ifVersion)
+        {
+            var d = new Dictionary<string, object> { { "id", id }, { "content", content }, { "ifVersion", ifVersion } };
+            string body = new JavaScriptSerializer().Serialize(d);
+            using (var wc = new TimeoutWebClient { TimeoutMs = 15000 })
+            {
+                wc.Encoding = Encoding.UTF8;
+                wc.Headers.Add("Content-Type", "application/json");
+                wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
+                try
+                {
+                    return wc.UploadString(Base + "/api/b/code/save?b=" + board, body);
+                }
+                catch (WebException e)
+                {
+                    var resp = e.Response as HttpWebResponse;
+                    if (resp != null)
+                    {
+                        using (var sr = new StreamReader(resp.GetResponseStream(), Encoding.UTF8)) return sr.ReadToEnd();
+                    }
+                    throw;
+                }
+            }
+        }
+
         public string CheckUpdate()
         {
             try
@@ -544,6 +739,15 @@ namespace NexusBoard
         public long Ts;
     }
 
+    class BufFlow : FlowLayoutPanel
+    {
+        public BufFlow()
+        {
+            SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+            UpdateStyles();
+        }
+    }
+
     class Round : Panel
     {
         public int Radius = 14;
@@ -558,6 +762,7 @@ namespace NexusBoard
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            base.OnPaint(e);
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
@@ -566,7 +771,6 @@ namespace NexusBoard
                 using (var b = new SolidBrush(Fill)) g.FillPath(b, path);
                 using (var p = new Pen(BorderColor)) g.DrawPath(p, path);
             }
-            base.OnPaint(e);
         }
 
         
@@ -612,6 +816,10 @@ namespace NexusBoard
         bool owner = false;
         bool trainView = false;
         bool chatView = false;
+        bool viewsView = false;
+        List<Dictionary<string, object>> blocks = new List<Dictionary<string, object>>();
+        int listCardWidth = 680;
+        string blocksVersion = "";
         List<ChatMsg> chatMsgs = new List<ChatMsg>();
         long chatLast = 0;
         Dictionary<string, object> train;
@@ -687,7 +895,13 @@ namespace NexusBoard
             };
 
             timer = new System.Windows.Forms.Timer { Interval = 10000 };
-            timer.Tick += (s, e) => { if (chatView) LoadChat(false); else if (trainView) LoadTrain(); else LoadBoard(); };
+            timer.Tick += (s, e) =>
+            {
+                if (chatView) LoadChat(false);
+                else if (trainView) LoadTrain();
+                else if (viewsView) LoadViews();
+                else LoadBoard();
+            };
             timer.Start();
         }
 
@@ -765,7 +979,7 @@ namespace NexusBoard
             chatSend.Click += (s, e) => SendChat();
             chatBar.Controls.Add(chatSend);
 
-            list = new FlowLayoutPanel
+            list = new BufFlow
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
@@ -985,7 +1199,10 @@ namespace NexusBoard
         void Render()
         {
             RenderTabs();
-            if (chatView) RenderChat(); else if (trainView) RenderTraining(); else RenderTasks();
+            if (chatView) RenderChat();
+            else if (trainView) RenderTraining();
+            else if (viewsView) RenderViews();
+            else RenderTasks();
             if (chatBar != null) chatBar.Visible = chatView;
             if (!chatView)
             {
@@ -1000,9 +1217,10 @@ namespace NexusBoard
         {
             ClearControls(tabs);
             tabs.Controls.Add(TabChip(L.T("tab_board"), "__board", !trainView && !chatView));
+            tabs.Controls.Add(TabChip(L.T("tab_views"), "__views", viewsView));
             tabs.Controls.Add(TabChip(L.T("tab_train"), "__train", trainView));
             tabs.Controls.Add(TabChip(L.T("tab_chat"), "__chat", chatView));
-            if (trainView || chatView) return;
+            if (trainView || chatView || viewsView) return;
             tabs.Controls.Add(TabChip(L.T("all"), "", activeSection == ""));
             foreach (var s in sections) tabs.Controls.Add(TabChip(s.Name, s.Id, activeSection == s.Id));
         }
@@ -1030,9 +1248,10 @@ namespace NexusBoard
             };
             EventHandler pick = (s, e) =>
             {
-                if (id == "__train") { trainView = true; chatView = false; Render(); LoadTrain(); return; }
-                if (id == "__chat") { chatView = true; trainView = false; Render(); LoadChat(true); return; }
-                if (id == "__board") { trainView = false; chatView = false; Render(); LoadBoard(); return; }
+                if (id == "__views") { viewsView = true; trainView = false; chatView = false; Render(); LoadViews(); return; }
+                if (id == "__train") { viewsView = false; trainView = true; chatView = false; Render(); LoadTrain(); return; }
+                if (id == "__chat") { viewsView = false; chatView = true; trainView = false; Render(); LoadChat(true); return; }
+                if (id == "__board") { viewsView = false; trainView = false; chatView = false; Render(); LoadBoard(); return; }
                 activeSection = id;
                 Render();
             };
@@ -1044,10 +1263,460 @@ namespace NexusBoard
             return chip;
         }
 
+
+        void LoadViews()
+        {
+            if (string.IsNullOrEmpty(boardId)) return;
+            if (Interlocked.CompareExchange(ref boardBusy, 1, 0) == 1) return;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var snap = api.Views(boardId);
+                    var parsed = new List<Dictionary<string, object>>();
+                    string ver = "";
+                    if (snap != null)
+                    {
+                        if (snap.ContainsKey("version")) ver = Convert.ToString(snap["version"]);
+                        if (snap.ContainsKey("blocks") && snap["blocks"] is object[])
+                        {
+                            foreach (var o in (object[])snap["blocks"])
+                            {
+                                var d = o as Dictionary<string, object>;
+                                if (d != null) parsed.Add(d);
+                            }
+                        }
+                    }
+                    BeginInvoke((Action)(() =>
+                    {
+                        blocks = parsed;
+                        blocksVersion = ver;
+                        lastSync = DateTime.Now;
+                        Render();
+                    }));
+                }
+                catch
+                {
+                    BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
+                }
+                finally { Interlocked.Exchange(ref boardBusy, 0); }
+            });
+        }
+
+        static Dictionary<string, object> Sub(Dictionary<string, object> d, string key)
+        {
+            if (d == null || !d.ContainsKey(key)) return null;
+            return d[key] as Dictionary<string, object>;
+        }
+
+        static object Val(Dictionary<string, object> d, string key)
+        {
+            if (d == null || !d.ContainsKey(key)) return null;
+            return d[key];
+        }
+
+        static string S(Dictionary<string, object> d, string key)
+        {
+            object v = Val(d, key);
+            return v == null ? "" : Convert.ToString(v);
+        }
+
+        static double N(Dictionary<string, object> d, string key)
+        {
+            object v = Val(d, key);
+            if (v == null) return 0;
+            double r;
+            return double.TryParse(Convert.ToString(v), NumberStyles.Any, CultureInfo.InvariantCulture, out r) ? r : 0;
+        }
+
+        Control ViewCard(Dictionary<string, object> b)
+        {
+            string kind = S(b, "kind");
+            string title = S(b, "title");
+            var body = Sub(b, "body");
+            if (body == null) body = new Dictionary<string, object>();
+            int width = listCardWidth;
+            int h = 96;
+            if (kind == "text") h = 44 + TextHeight(S(body, "text"), width - 60);
+            else if (kind == "log") h = 92 + 16 * 8;
+            else if (kind == "status") h = 62 + 26 * CountItems(body, "items");
+            else if (kind == "links") h = 58 + 28 * CountItems(body, "items");
+            else if (kind == "progress" || kind == "metric") h = 118;
+            else if (kind == "code") h = 108;
+
+            var card = new Round
+            {
+                Radius = 16,
+                Fill = th.Card,
+                BorderColor = th.Line,
+                Width = width,
+                Height = h,
+                Margin = new Padding(0, 0, 0, 12)
+            };
+            card.Controls.Add(new Label
+            {
+                Text = title,
+                AutoSize = false,
+                Width = width - 130,
+                Height = 24,
+                Location = new Point(24, 16),
+                Font = FontCache.Get("Segoe UI Semibold", 11.5f, FontStyle.Regular),
+                ForeColor = th.Text,
+                BackColor = Color.Transparent
+            });
+            card.Controls.Add(new Label
+            {
+                Text = kind.ToUpper(),
+                AutoSize = false,
+                Width = 100,
+                Height = 20,
+                Location = new Point(width - 124, 18),
+                TextAlign = ContentAlignment.MiddleRight,
+                Font = FontCache.Get("Segoe UI", 8f, FontStyle.Bold),
+                ForeColor = th.Dim,
+                BackColor = Color.Transparent
+            });
+
+            if (kind == "metric")
+            {
+                card.Controls.Add(new Label
+                {
+                    Text = S(body, "value") + " " + S(body, "unit"),
+                    AutoSize = false,
+                    Width = width - 60,
+                    Height = 40,
+                    Location = new Point(24, 42),
+                    Font = FontCache.Get("Segoe UI Semibold", 20f, FontStyle.Bold),
+                    ForeColor = th.Accent,
+                    BackColor = Color.Transparent
+                });
+                card.Controls.Add(new Label
+                {
+                    Text = S(body, "sub"),
+                    AutoSize = false,
+                    Width = width - 60,
+                    Height = 22,
+                    Location = new Point(24, 84),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular)
+                });
+            }
+            else if (kind == "progress")
+            {
+                int pct = (int)Math.Max(0, Math.Min(100, N(body, "value")));
+                string label = S(body, "label");
+                if (!string.IsNullOrEmpty(label))
+                {
+                    card.Controls.Add(new Label
+                    {
+                        Text = label,
+                        AutoSize = false,
+                        Width = width - 160,
+                        Height = 20,
+                        Location = new Point(24, 44),
+                        ForeColor = th.Dim,
+                        BackColor = Color.Transparent,
+                        Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular)
+                    });
+                }
+                card.Controls.Add(new Round { Radius = 6, Fill = th.Line, BorderColor = th.Line, Location = new Point(24, 70), Size = new Size(width - 150, 10) });
+                var fillBar = new Round
+                {
+                    Radius = 6,
+                    Fill = th.Accent,
+                    BorderColor = th.Accent,
+                    Location = new Point(24, 70),
+                    Size = new Size(Math.Max(6, (width - 150) * pct / 100), 10)
+                };
+                card.Controls.Add(fillBar);
+                fillBar.BringToFront();
+                card.Controls.Add(new Label
+                {
+                    Text = pct + "%" + (string.IsNullOrEmpty(S(body, "eta")) ? "" : "  ·  " + S(body, "eta")),
+                    AutoSize = false,
+                    Width = 120,
+                    Height = 22,
+                    Location = new Point(width - 138, 64),
+                    TextAlign = ContentAlignment.MiddleRight,
+                    ForeColor = th.Text,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI Semibold", 10.5f, FontStyle.Bold)
+                });
+            }
+            else if (kind == "status")
+            {
+                int y = 46;
+                var items = Val(body, "items") as object[];
+                if (items != null)
+                {
+                    foreach (var it in items)
+                    {
+                        var row = it as Dictionary<string, object>;
+                        if (row == null) continue;
+                        string state = S(row, "state");
+                        Color col = state == "ok" ? Color.FromArgb(84, 214, 168)
+                            : state == "warn" ? Color.FromArgb(224, 158, 62)
+                            : state == "err" ? Color.FromArgb(226, 100, 100) : th.Dim;
+                        card.Controls.Add(new Panel { BackColor = col, Location = new Point(26, y + 7), Size = new Size(8, 8) });
+                        card.Controls.Add(new Label
+                        {
+                            Text = S(row, "label"),
+                            AutoSize = false,
+                            Width = width / 2,
+                            Height = 22,
+                            Location = new Point(44, y),
+                            ForeColor = th.Text,
+                            BackColor = Color.Transparent,
+                            Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                        });
+                        card.Controls.Add(new Label
+                        {
+                            Text = S(row, "note"),
+                            AutoSize = false,
+                            Width = width / 2 - 70,
+                            Height = 22,
+                            Location = new Point(width / 2 + 10, y),
+                            TextAlign = ContentAlignment.MiddleRight,
+                            ForeColor = th.Dim,
+                            BackColor = Color.Transparent,
+                            AutoEllipsis = true,
+                            Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular)
+                        });
+                        y += 26;
+                    }
+                }
+            }
+            else if (kind == "text")
+            {
+                card.Controls.Add(new Label
+                {
+                    Text = S(body, "text"),
+                    AutoSize = false,
+                    Width = width - 52,
+                    Height = h - 52,
+                    Location = new Point(24, 44),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                });
+            }
+            else if (kind == "log")
+            {
+                var tail = Sub(b, "tail");
+                string text = "";
+                if (tail != null && Val(tail, "lines") is object[])
+                {
+                    var lines = (object[])Val(tail, "lines");
+                    var keep = lines.Skip(Math.Max(0, lines.Length - 10)).Select(x => Convert.ToString(x));
+                    text = string.Join(Environment.NewLine, keep);
+                }
+                else if (tail != null && S(tail, "error") != "")
+                {
+                    text = S(tail, "error");
+                }
+                card.Controls.Add(new TextBox
+                {
+                    Multiline = true,
+                    ReadOnly = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    BorderStyle = BorderStyle.None,
+                    BackColor = th.Name == "frost" ? Color.FromArgb(244, 246, 251) : Color.FromArgb(14, 11, 23),
+                    ForeColor = th.Dim,
+                    Font = FontCache.Get("Consolas", 9f, FontStyle.Regular),
+                    Location = new Point(24, 46),
+                    Size = new Size(width - 52, h - 66),
+                    Text = text
+                });
+            }
+            else if (kind == "links")
+            {
+                int y = 44;
+                var items = Val(body, "items") as object[];
+                if (items != null)
+                {
+                    foreach (var it in items)
+                    {
+                        var row = it as Dictionary<string, object>;
+                        if (row == null) continue;
+                        string url = S(row, "url");
+                        var link = new LinkLabel
+                        {
+                            Text = S(row, "label") + (string.IsNullOrEmpty(S(row, "note")) ? "" : "  ·  " + S(row, "note")),
+                            AutoSize = false,
+                            Width = width - 52,
+                            Height = 24,
+                            Location = new Point(24, y),
+                            LinkColor = th.Accent,
+                            ActiveLinkColor = th.Accent,
+                            BackColor = Color.Transparent,
+                            Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                        };
+                        link.LinkClicked += (s2, e2) =>
+                        {
+                            try { System.Diagnostics.Process.Start(url); } catch { }
+                        };
+                        card.Controls.Add(link);
+                        y += 28;
+                    }
+                }
+            }
+            else if (kind == "code")
+            {
+                card.Controls.Add(new Label
+                {
+                    Text = S(body, "filename") + "   v" + S(body, "version") + "   " + S(body, "sha"),
+                    AutoSize = false,
+                    Width = width - 220,
+                    Height = 20,
+                    Location = new Point(24, 46),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Consolas", 9f, FontStyle.Regular)
+                });
+                var open = new FlatButton { Text = "открыть", Size = new Size(120, 34), Location = new Point(width - 148, 44) };
+                StyleButton(open);
+                open.Click += (s2, e2) => OpenCodeBlock(S(b, "id"), S(b, "title"));
+                card.Controls.Add(open);
+                card.Controls.Add(new Label
+                {
+                    Text = L.Lang == "en" ? "code from the PC — the phone pulls changes" : "код с ПК, телефон подтягивает изменения",
+                    AutoSize = false,
+                    Width = width - 52,
+                    Height = 20,
+                    Location = new Point(24, 74),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 9f, FontStyle.Regular)
+                });
+            }
+            else if (kind == "tasks")
+            {
+                int doing = tasks.Count(t => t.Status == "doing");
+                int done = tasks.Count(t => t.Status == "done");
+                card.Controls.Add(new Label
+                {
+                    Text = (L.Lang == "en" ? "in progress " : "в работе ") + doing + "   ·   " +
+                        (L.Lang == "en" ? "closed " : "закрыто ") + done + "   ·   " +
+                        (L.Lang == "en" ? "total " : "всего ") + tasks.Count,
+                    AutoSize = false,
+                    Width = width - 52,
+                    Height = 46,
+                    Location = new Point(24, 44),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10.5f, FontStyle.Regular)
+                });
+            }
+            else if (kind == "activity")
+            {
+                card.Controls.Add(new Label
+                {
+                    Text = L.Lang == "en" ? "action feed — see the Board tab" : "лента действий — на вкладке «Доска»",
+                    AutoSize = false,
+                    Width = width - 52,
+                    Height = 40,
+                    Location = new Point(24, 44),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                });
+            }
+            else
+            {
+                card.Controls.Add(new Label
+                {
+                    Text = (L.Lang == "en" ? "kind not supported by this client: " : "клиент не знает такой раздел: ") + kind,
+                    AutoSize = false,
+                    Width = width - 52,
+                    Height = 40,
+                    Location = new Point(24, 44),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                });
+            }
+            return card;
+        }
+
+        static int CountItems(Dictionary<string, object> body, string key)
+        {
+            var items = Val(body, key) as object[];
+            if (items == null) return 1;
+            return Math.Max(1, Math.Min(10, items.Length));
+        }
+
+        int TextHeight(string text, int width)
+        {
+            if (string.IsNullOrEmpty(text)) return 24;
+            var size = TextRenderer.MeasureText(text, FontCache.Get("Segoe UI", 10f, FontStyle.Regular), new Size(width, 0), TextFormatFlags.WordBreak);
+            return Math.Max(24, Math.Min(320, size.Height));
+        }
+
+        void RenderViews()
+        {
+            list.SuspendLayout();
+            ClearControls(list);
+            listCardWidth = Math.Max(420, list.ClientSize.Width - 58);
+            if (blocks.Count == 0)
+            {
+                var empty = new Round
+                {
+                    Radius = 18,
+                    Fill = th.Card,
+                    BorderColor = th.Line,
+                    Width = listCardWidth,
+                    Height = 150,
+                    Margin = new Padding(0, 0, 0, 12)
+                };
+                empty.Controls.Add(new Label
+                {
+                    Text = L.Lang == "en" ? "The AI has not created sections yet" : "ИИ ещё не создал разделы",
+                    AutoSize = false,
+                    Width = empty.Width - 60,
+                    Height = 28,
+                    Location = new Point(26, 34),
+                    ForeColor = th.Text,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI Semibold", 11f, FontStyle.Regular)
+                });
+                empty.Controls.Add(new Label
+                {
+                    Text = L.Lang == "en"
+                        ? "Ask in chat: \"add a section\" — it appears here on its own, on the PC and the phone."
+                        : "Напиши в чате: «сделай раздел» — он появится здесь сам, и на ПК, и на телефоне.",
+                    AutoSize = false,
+                    Width = empty.Width - 60,
+                    Height = 52,
+                    Location = new Point(26, 64),
+                    ForeColor = th.Dim,
+                    BackColor = Color.Transparent,
+                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                });
+                list.Controls.Add(empty);
+                list.ResumeLayout();
+            list.Invalidate(true);
+                return;
+            }
+            foreach (var b in blocks) list.Controls.Add(ViewCard(b));
+            list.ResumeLayout();
+        }
+
+        void OpenCodeBlock(string id, string title)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            using (var dlg = new CodeDialog(api, boardId, th, id, title))
+            {
+                dlg.ShowDialog(this);
+            }
+            LoadViews();
+        }
+
         void RenderTasks()
         {
             list.SuspendLayout();
             ClearControls(list);
+            listCardWidth = Math.Max(420, list.ClientSize.Width - 58);
             var shown = tasks.Where(t => activeSection == "" || t.Section == activeSection).ToList();
             shown.Sort((a, b) =>
             {
@@ -1063,7 +1732,7 @@ namespace NexusBoard
                     Radius = 18,
                     Fill = th.Card,
                     BorderColor = th.Line,
-                    Width = Math.Max(380, list.Width - 60),
+                    Width = Math.Min(listCardWidth, Math.Max(380, list.ClientSize.Width - 60)),
                     Height = 140,
                     Margin = new Padding(0, 0, 0, 12)
                 };
@@ -1097,6 +1766,7 @@ namespace NexusBoard
 
             foreach (var t in shown) list.Controls.Add(TaskCard(t));
             list.ResumeLayout();
+            list.Invalidate(true);
         }
 
         static int Rank(string status)
@@ -1127,7 +1797,7 @@ namespace NexusBoard
                 Radius = 16,
                 Fill = th.Card,
                 BorderColor = th.Line,
-                Width = Math.Max(420, list.Width - 58),
+                Width = listCardWidth,
                 Height = h,
                 Margin = new Padding(0, 0, 0, 12),
                 Cursor = Cursors.Hand
@@ -1647,6 +2317,10 @@ namespace NexusBoard
             {
                 chatView = true;
             }
+            if (view == "views")
+            {
+                viewsView = true;
+            }
             if (!string.IsNullOrEmpty(theme))
             {
                 th = Theme.Get(theme);
@@ -1659,7 +2333,9 @@ namespace NexusBoard
             }
             settings.Save();
             ApplyTheme();
-            if (chatView) { Render(); LoadChat(true); } else LoadBoard();
+            if (chatView) { Render(); LoadChat(true); }
+            else if (viewsView) { Render(); LoadViews(); }
+            else LoadBoard();
         }
 
         void Click_Theme(object s, EventArgs e)
