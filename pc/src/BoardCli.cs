@@ -544,6 +544,7 @@ namespace NexusBoard.Cli
 
         public static int Run(string[] args)
         {
+            try { Console.OutputEncoding = new UTF8Encoding(false); } catch { }
             var d = Parse(args);
             string cmd = "";
             for (int i = 0; i < args.Length; i++) { if (args[i].StartsWith("--")) { cmd = args[i].Substring(2).ToLowerInvariant(); break; } }
