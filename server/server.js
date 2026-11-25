@@ -491,6 +491,18 @@ const server = http.createServer((req, res) => {
       return json(res, 200, { ok: true, sections: data.sections || [] });
     }
 
+    if (url === "/api/b/activity") {
+      try {
+        const raw = fs.readFileSync(ACT, "utf8").trim().split(String.fromCharCode(10)).map((x) => x.replace(String.fromCharCode(13), ""));
+        const rows = raw.slice(-40).map((l) => {
+          try { return JSON.parse(l); } catch (e) { return null; }
+        }).filter(Boolean).slice(-20).reverse();
+        return json(res, 200, { ok: true, items: rows });
+      } catch (e) {
+        return json(res, 200, { ok: true, items: [] });
+      }
+    }
+
     const viewsOf = (data) => {
       data.blocks = Array.isArray(data.blocks) ? data.blocks : [];
       return data.blocks;

@@ -679,6 +679,12 @@ namespace NexusBoard
             return new JavaScriptSerializer().DeserializeObject(Get("/api/b/views?b=" + board)) as Dictionary<string, object>;
         }
 
+        public Dictionary<string, object> Activity(string board)
+        {
+            try { return new JavaScriptSerializer().DeserializeObject(Get("/api/b/activity?b=" + board)) as Dictionary<string, object>; }
+            catch { return null; }
+        }
+
         public Dictionary<string, object> CodeGet(string board, string id)
         {
             return new JavaScriptSerializer().DeserializeObject(Get("/api/b/code?b=" + board + "&id=" + id)) as Dictionary<string, object>;
@@ -818,6 +824,7 @@ namespace NexusBoard
         bool chatView = false;
         bool viewsView = false;
         List<Dictionary<string, object>> blocks = new List<Dictionary<string, object>>();
+        List<Dictionary<string, object>> feed = new List<Dictionary<string, object>>();
         int listCardWidth = 680;
         string blocksVersion = "";
         List<ChatMsg> chatMsgs = new List<ChatMsg>();
@@ -1008,6 +1015,40 @@ namespace NexusBoard
             catch { }
         }
 
+        static List<Dictionary<string, object>> SelfCheckBlocks()
+        {
+            var list = new List<Dictionary<string, object>>();
+            foreach (var kind in new[] { "metric", "progress", "status", "text", "log", "links", "code", "tasks", "activity", "unknown_kind" })
+            {
+                var body = new Dictionary<string, object>();
+                if (kind == "metric") { body["value"] = "1"; body["unit"] = "шт"; body["sub"] = "sub"; }
+                if (kind == "progress") { body["value"] = 42; body["label"] = "label"; body["eta"] = "eta"; }
+                if (kind == "status")
+                {
+                    body["items"] = new object[]
+                    {
+                        new Dictionary<string, object> { { "label", "a" }, { "state", "ok" }, { "note", "n" } },
+                        new Dictionary<string, object> { { "label", "b" }, { "state", "warn" }, { "note", "n" } }
+                    };
+                }
+                if (kind == "text") body["text"] = "текст\r\nвторая строка";
+                if (kind == "links")
+                {
+                    body["items"] = new object[]
+                    {
+                        new Dictionary<string, object> { { "label", "l" }, { "url", "https://example.com" }, { "note", "note" } }
+                    };
+                }
+                if (kind == "code") { body["filename"] = "a.diff"; body["content"] = "x"; body["version"] = 1; body["sha"] = "abc"; }
+                list.Add(new Dictionary<string, object>
+                {
+                    { "id", "sc_" + kind }, { "kind", kind }, { "title", kind }, { "order", 0 }, { "size", "sm" }, { "body", body },
+                    { "tail", new Dictionary<string, object> { { "lines", new object[] { "log line 1", "log line 2" } } } }
+                });
+            }
+            return list;
+        }
+
         public void SelfCheck()
         {
             Trace("selfcheck start");
@@ -1046,6 +1087,30 @@ namespace NexusBoard
             Render();
             L.Lang = L.Lang == "en" ? "ru" : "en";
             ApplyTheme();
+            try
+            {
+                blocks = SelfCheckBlocks();
+                feed = new List<Dictionary<string, object>>
+                {
+                    new Dictionary<string, object> { { "ts", "2026-11-25T21:58:31" }, { "kind", "add" }, { "text", "selfcheck" } }
+                };
+                viewsView = true;
+                foreach (var th3 in Theme.All)
+                {
+                    th = th3;
+                    ApplyTheme();
+                    RenderViews();
+                }
+                viewsView = false;
+                th = Theme.Get(settings.Theme);
+                ApplyTheme();
+                using (var dlg = new CodeDialog(api, boardId, th, "selftest", "selftest")) { }
+                Trace("views+code dialog ok");
+            }
+            catch (Exception ex)
+            {
+                Trace("views/code FAIL " + ex.Message);
+            }
             try
             {
                 System.IO.File.WriteAllText(
@@ -1273,6 +1338,16 @@ namespace NexusBoard
                 try
                 {
                     var snap = api.Views(boardId);
+                    var act = api.Activity(boardId);
+                    var parsedFeed = new List<Dictionary<string, object>>();
+                    if (act != null && act.ContainsKey("items") && act["items"] is object[])
+                    {
+                        foreach (var o in (object[])act["items"])
+                        {
+                            var d = o as Dictionary<string, object>;
+                            if (d != null) parsedFeed.Add(d);
+                        }
+                    }
                     var parsed = new List<Dictionary<string, object>>();
                     string ver = "";
                     if (snap != null)
@@ -1290,6 +1365,7 @@ namespace NexusBoard
                     BeginInvoke((Action)(() =>
                     {
                         blocks = parsed;
+                        feed = parsedFeed;
                         blocksVersion = ver;
                         lastSync = DateTime.Now;
                         Render();
@@ -1343,6 +1419,7 @@ namespace NexusBoard
             else if (kind == "links") h = 58 + 28 * CountItems(body, "items");
             else if (kind == "progress" || kind == "metric") h = 118;
             else if (kind == "code") h = 108;
+            else if (kind == "activity") h = 56 + 22 * Math.Max(1, Math.Min(8, feed.Count));
 
             var card = new Round
             {
@@ -1610,17 +1687,54 @@ namespace NexusBoard
             }
             else if (kind == "activity")
             {
-                card.Controls.Add(new Label
+                int y = 44;
+                int n = 0;
+                foreach (var item in feed)
                 {
-                    Text = L.Lang == "en" ? "action feed — see the Board tab" : "лента действий — на вкладке «Доска»",
-                    AutoSize = false,
-                    Width = width - 52,
-                    Height = 40,
-                    Location = new Point(24, 44),
-                    ForeColor = th.Dim,
-                    BackColor = Color.Transparent,
-                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
-                });
+                    if (n >= 8) break;
+                    string ts = S(item, "ts");
+                    string when = ts.Length >= 16 ? ts.Substring(11, 5) : ts;
+                    string kindName = S(item, "kind");
+                    card.Controls.Add(new Label
+                    {
+                        Text = when + "   " + kindName,
+                        AutoSize = false,
+                        Width = 120,
+                        Height = 20,
+                        Location = new Point(24, y),
+                        ForeColor = th.Dim,
+                        BackColor = Color.Transparent,
+                        Font = FontCache.Get("Consolas", 9f, FontStyle.Regular)
+                    });
+                    card.Controls.Add(new Label
+                    {
+                        Text = S(item, "text"),
+                        AutoSize = false,
+                        Width = width - 200,
+                        Height = 20,
+                        Location = new Point(150, y),
+                        ForeColor = th.Text,
+                        BackColor = Color.Transparent,
+                        AutoEllipsis = true,
+                        Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular)
+                    });
+                    y += 22;
+                    n++;
+                }
+                if (n == 0)
+                {
+                    card.Controls.Add(new Label
+                    {
+                        Text = L.Lang == "en" ? "no events yet" : "событий пока нет",
+                        AutoSize = false,
+                        Width = width - 52,
+                        Height = 24,
+                        Location = new Point(24, 44),
+                        ForeColor = th.Dim,
+                        BackColor = Color.Transparent,
+                        Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
+                    });
+                }
             }
             else
             {
