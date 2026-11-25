@@ -43,9 +43,13 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity {
 
     private Prefs prefs;
-    private final ExecutorService pool = Executors.newFixedThreadPool(2);
+    private final ExecutorService pool = Executors.newFixedThreadPool(3);
     private static final long REFRESH_MS = 10000L;
     private static final long REFRESH_SLOW_MS = 30000L;
+    private static final long VIEWS_MS = 5000L;
+    private static final int TAB_BOARD = 0;
+    private static final int TAB_TRAIN = 1;
+    private static final int TAB_VIEWS = 2;
     private volatile boolean loading = false;
     private volatile boolean lastFailed = false;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -53,18 +57,24 @@ public class MainActivity extends AppCompatActivity {
     private BoardAdapter adapter;
     private RecyclerView list;
     private SwipeRefreshLayout swipe;
+    private SwipeRefreshLayout viewsSwipe;
     private NestedScrollView trainScroll;
+    private LinearLayout viewsBox;
     private LinearLayout chips;
     private HorizontalScrollView chipsWrap;
     private List<String[]> sections = new ArrayList<>();
     private String activeSection = "";
     private JSONObject lastTasks;
-    private TextView status, tabBoard, tabTrain;
+    private TextView status, tabBoard, tabTrain, tabViews;
     private TextView trState, trRun, trStage, trStep, trLoss, trEta, trRate, trSteps, trChain, trTail;
     private ProgressBar trBar;
     private SparkView trSpark;
 
-    private boolean showTrain = false;
+    private int tab = TAB_BOARD;
+    private volatile boolean viewsLoading = false;
+    private boolean viewsReady = false;
+    private String viewsVersion = "";
+    private int viewsCount = -1;
     private String pendingUpdate = null;
     private String pendingNotes = "";
 
@@ -80,8 +90,11 @@ public class MainActivity extends AppCompatActivity {
         status = findViewById(R.id.status);
         tabBoard = findViewById(R.id.tab_board);
         tabTrain = findViewById(R.id.tab_train);
+        tabViews = findViewById(R.id.tab_views);
         list = findViewById(R.id.list);
         swipe = findViewById(R.id.swipe);
+        viewsSwipe = findViewById(R.id.views_swipe);
+        viewsBox = findViewById(R.id.views_box);
         trainScroll = findViewById(R.id.train_scroll);
         chips = findViewById(R.id.chips);
         chipsWrap = findViewById(R.id.chips_wrap);
@@ -107,6 +120,9 @@ public class MainActivity extends AppCompatActivity {
         swipe.setColorSchemeColors(accent);
         swipe.setProgressBackgroundColorSchemeColor(NxBackdrop.color(this, R.attr.nxSurface));
         swipe.setOnRefreshListener(this::load);
+        viewsSwipe.setColorSchemeColors(accent);
+        viewsSwipe.setProgressBackgroundColorSchemeColor(NxBackdrop.color(this, R.attr.nxSurface));
+        viewsSwipe.setOnRefreshListener(() -> loadViews(true));
 
         findViewById(R.id.btn_theme).setOnClickListener(v -> nextTheme());
         findViewById(R.id.btn_chat).setOnClickListener(v ->
@@ -121,12 +137,17 @@ public class MainActivity extends AppCompatActivity {
         TextView langBtn = findViewById(R.id.btn_lang);
         langBtn.setText("ru".equals(prefs.lang()) ? "EN" : "RU");
 
-        tabBoard.setOnClickListener(v -> selectTab(false));
-        tabTrain.setOnClickListener(v -> selectTab(true));
-        if (!prefs.nexusMode()) {
-            findViewById(R.id.tabs).setVisibility(View.GONE);
-            selectTab(false);
-        }
+        tabBoard.setOnClickListener(v -> selectTab(TAB_BOARD));
+        tabTrain.setOnClickListener(v -> selectTab(TAB_TRAIN));
+        tabViews.setOnClickListener(v -> selectTab(TAB_VIEWS));
+        updateTabs();
+        int start = prefs.tabMode();
+        boolean allowed = prefs.nexusMode() || !prefs.boardId().isEmpty();
+        if (!allowed) start = TAB_BOARD;
+        if (start == TAB_TRAIN && !prefs.nexusMode()) start = TAB_BOARD;
+        if (start != TAB_TRAIN && start != TAB_VIEWS) start = TAB_BOARD;
+        if (start == TAB_VIEWS && !allowed) start = TAB_BOARD;
+        selectTab(start);
         findViewById(R.id.empty_btn).setOnClickListener(v -> openConnect());
 
         status.setOnClickListener(v -> openConnect());
@@ -140,7 +161,6 @@ public class MainActivity extends AppCompatActivity {
             return true;
         });
 
-        selectTab(prefs.nexusMode() && prefs.trainTab());
         load();
     }
 
@@ -172,18 +192,139 @@ public class MainActivity extends AppCompatActivity {
         recreate();
     }
 
-    private void selectTab(boolean train) {
-        showTrain = train;
-        prefs.trainTab(train);
-        trainScroll.setVisibility(train ? View.VISIBLE : View.GONE);
-        swipe.setVisibility(train ? View.GONE : View.VISIBLE);
-        int on = NxBackdrop.color(this, R.attr.nxPrimary);
+    private void selectTab(int next) {
+        tab = next;
+        prefs.tabMode(next);
+        trainScroll.setVisibility(next == TAB_TRAIN ? View.VISIBLE : View.GONE);
+        swipe.setVisibility(next == TAB_BOARD ? View.VISIBLE : View.GONE);
+        viewsSwipe.setVisibility(next == TAB_VIEWS ? View.VISIBLE : View.GONE);
         int onText = NxBackdrop.color(this, R.attr.nxOnPrimary);
         int dim = NxBackdrop.color(this, R.attr.nxTextDim);
-        tabBoard.setBackgroundResource(train ? R.drawable.nx_pill_off : R.drawable.nx_pill_on);
-        tabBoard.setTextColor(train ? dim : onText);
-        tabTrain.setBackgroundResource(train ? R.drawable.nx_pill_on : R.drawable.nx_pill_off);
-        tabTrain.setTextColor(train ? onText : dim);
+        pill(tabBoard, next == TAB_BOARD, onText, dim);
+        pill(tabTrain, next == TAB_TRAIN, onText, dim);
+        pill(tabViews, next == TAB_VIEWS, onText, dim);
+        if (next == TAB_VIEWS) {
+            loadViews(true);
+            ui.removeCallbacks(viewsTick);
+            ui.postDelayed(viewsTick, VIEWS_MS);
+        } else {
+            ui.removeCallbacks(viewsTick);
+        }
+    }
+
+    private void pill(TextView tv, boolean active, int onText, int dim) {
+        tv.setBackgroundResource(active ? R.drawable.nx_pill_on : R.drawable.nx_pill_off);
+        tv.setTextColor(active ? onText : dim);
+    }
+
+    private void updateTabs() {
+        boolean nexus = prefs.nexusMode();
+        boolean board = !prefs.boardId().isEmpty();
+        findViewById(R.id.tabs).setVisibility(nexus || board ? View.VISIBLE : View.GONE);
+        tabTrain.setVisibility(nexus ? View.VISIBLE : View.GONE);
+        tabViews.setVisibility(nexus || board ? View.VISIBLE : View.GONE);
+    }
+
+    private final Runnable viewsTick = new Runnable() {
+        @Override
+        public void run() {
+            if (tab == TAB_VIEWS) loadViews(false);
+            ui.postDelayed(this, VIEWS_MS);
+        }
+    };
+
+    private void loadViews(boolean force) {
+        final String key = prefs.key();
+        final String base = prefs.base();
+        final String board = prefs.boardId();
+        if (force) viewsVersion = "";
+        if (viewsLoading) return;
+        if (board.isEmpty()) {
+            viewsSwipe.setRefreshing(false);
+            renderViewsHint();
+            return;
+        }
+        viewsLoading = true;
+        if (force) viewsSwipe.setRefreshing(true);
+        pool.execute(() -> {
+            JSONObject o = null;
+            try {
+                o = Api.views(base, board, key);
+            } catch (Exception ignored) {
+            }
+            final JSONObject fo = o;
+            ui.post(() -> {
+                viewsLoading = false;
+                viewsSwipe.setRefreshing(false);
+                if (fo != null) renderViews(fo);
+                else if (!viewsReady) renderViewsHint();
+            });
+        });
+    }
+
+    private View hintCard(int titleRes, int bodyRes) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (16 * getResources().getDisplayMetrics().density);
+        card.setPadding(p, p, p, p);
+        card.setBackgroundResource(R.drawable.nx_card);
+
+        TextView title = new TextView(this);
+        title.setText(titleRes);
+        title.setTextSize(16f);
+        title.setTextColor(NxBackdrop.color(this, R.attr.nxText));
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(title);
+
+        TextView body = new TextView(this);
+        body.setText(bodyRes);
+        body.setTextSize(13f);
+        body.setLineSpacing((int) (3 * getResources().getDisplayMetrics().density), 1f);
+        body.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);
+        card.addView(body, lp);
+        return card;
+    }
+
+    private void renderViewsHint() {
+        viewsReady = true;
+        viewsVersion = "";
+        viewsCount = -1;
+        viewsBox.removeAllViews();
+        boolean noBoard = prefs.boardId().isEmpty();
+        viewsBox.addView(hintCard(noBoard ? R.string.views_need_board : R.string.views_empty_title,
+                noBoard ? R.string.views_need_body : R.string.views_empty_body));
+    }
+
+    private void renderViews(JSONObject o) {
+        JSONArray blocks = o.optJSONArray("blocks");
+        List<JSONObject> items = new ArrayList<>();
+        if (blocks != null) {
+            for (int i = 0; i < blocks.length(); i++) {
+                JSONObject b = blocks.optJSONObject(i);
+                if (b != null) items.add(b);
+            }
+        }
+        items.sort((a, b) -> Integer.compare(a.optInt("order", 0), b.optInt("order", 0)));
+        String version = o.optString("version", "");
+        if (viewsReady && !version.isEmpty() && version.equals(viewsVersion) && items.size() == viewsCount) {
+            return;
+        }
+        viewsReady = true;
+        viewsVersion = version;
+        viewsCount = items.size();
+        viewsBox.removeAllViews();
+
+        BlocksView render = new BlocksView(this, lastTasks, prefs.boardId());
+        for (JSONObject b : items) {
+            View v = render.build(b);
+            if (v != null) viewsBox.addView(v);
+        }
+        if (viewsBox.getChildCount() == 0) {
+            viewsBox.addView(hintCard(R.string.views_empty_title, R.string.views_empty_body));
+        }
     }
 
     private void load() {
@@ -239,6 +380,7 @@ public class MainActivity extends AppCompatActivity {
                 loading = false;
                 lastFailed = fError != null && fTasks == null && fTrain == null;
                 swipe.setRefreshing(false);
+                updateTabs();
                 if (fAuth) {
                     askKey();
                     return;
@@ -721,11 +863,17 @@ public class MainActivity extends AppCompatActivity {
         load();
         ui.removeCallbacks(tick);
         ui.postDelayed(tick, REFRESH_MS);
+        if (tab == TAB_VIEWS) {
+            loadViews(true);
+            ui.removeCallbacks(viewsTick);
+            ui.postDelayed(viewsTick, VIEWS_MS);
+        }
     }
 
     @Override
     protected void onPause() {
         ui.removeCallbacks(tick);
+        ui.removeCallbacks(viewsTick);
         super.onPause();
     }
 

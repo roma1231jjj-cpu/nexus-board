@@ -72,6 +72,14 @@ public final class Prefs {
         sp.edit().putBoolean("trainTab", v).apply();
     }
 
+    public int tabMode() {
+        return sp.getInt("tabMode", sp.getBoolean("trainTab", false) ? 1 : 0);
+    }
+
+    public void tabMode(int v) {
+        sp.edit().putInt("tabMode", v).putBoolean("trainTab", v == 1).apply();
+    }
+
     public long lastUpdateCheck() {
         return sp.getLong("updCheck", 0L);
     }

@@ -29,6 +29,12 @@
             android:parentActivityName=".MainActivity"
             android:configChanges="uiMode|orientation|screenSize" />
 
+        <activity
+            android:name=".CodeActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:configChanges="uiMode|orientation|screenSize" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -77,4 +77,38 @@
     <string name="chat_net_error">Нет связи с сервером · нажми, чтобы повторить</string>
     <string name="chat_send_failed">Не отправлено · нет связи с сервером</string>
     <string name="chat_need_board">Сначала подключи доску · нажми, чтобы повторить</string>
+
+    <string name="tab_views">Разделы</string>
+    <string name="views_empty_title">Разделов пока нет</string>
+    <string name="views_empty_body">ИИ создаёт их сам: как только на доске появятся блоки, они окажутся здесь.</string>
+    <string name="views_need_board">Нужен ключ доски</string>
+    <string name="views_need_body">Открой «Ключ доски» и вставь ключ с компьютера — тогда разделы станут общими.</string>
+    <string name="views_no_data">Нет данных</string>
+    <string name="views_log_empty">Хвост пуст</string>
+    <string name="views_eta">осталось %1$s</string>
+    <string name="views_open">Открыть</string>
+    <string name="views_tasks">Задачи</string>
+    <string name="views_tasks_doing">в работе</string>
+    <string name="views_tasks_done">готово</string>
+    <string name="views_tasks_total">всего</string>
+    <string name="views_activity">Действия</string>
+    <string name="views_activity_hint">Лента действий — на вкладке «Доска».</string>
+    <string name="views_chart">График</string>
+
+    <string name="code_title">Код</string>
+    <string name="code_hint">текст документа…</string>
+    <string name="code_pull">Забрать</string>
+    <string name="code_save">Сохранить</string>
+    <string name="code_saving">сохраняю…</string>
+    <string name="code_saved">сохранено · v%1$d</string>
+    <string name="code_took">взято с сервера</string>
+    <string name="code_keep">твои правки · сохранение перезапишет v%1$d</string>
+    <string name="code_empty">Пустой текст не сохраняется</string>
+    <string name="code_not_found">Документ не найден</string>
+    <string name="code_http">Сервер ответил %1$s</string>
+    <string name="code_pull_confirm">Забрать версию с сервера? Несохранённые правки будут заменены.</string>
+    <string name="code_conflict_title">На сервере новая версия</string>
+    <string name="code_conflict_body">На компьютере уже версия %1$d. Забери её или оставь свои правки — без твоего выбора ничего не потеряется.</string>
+    <string name="code_conflict_take">Забрать с сервера</string>
+    <string name="code_conflict_keep">Оставить мои</string>
 </resources>

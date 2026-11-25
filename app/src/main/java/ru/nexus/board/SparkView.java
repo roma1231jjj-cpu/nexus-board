@@ -21,6 +21,10 @@ public class SparkView extends View {
     private final Path path = new Path();
     private final Path area = new Path();
 
+    public SparkView(Context c) {
+        this(c, null);
+    }
+
     public SparkView(Context c, AttributeSet a) {
         super(c, a);
         line.setStyle(Paint.Style.STROKE);

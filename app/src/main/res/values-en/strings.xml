@@ -77,4 +77,38 @@
     <string name="chat_net_error">No connection to the server · tap to retry</string>
     <string name="chat_send_failed">Not sent · no connection to the server</string>
     <string name="chat_need_board">Connect the board first · tap to retry</string>
+
+    <string name="tab_views">Sections</string>
+    <string name="views_empty_title">No sections yet</string>
+    <string name="views_empty_body">The AI builds them: once the board has blocks they show up here.</string>
+    <string name="views_need_board">Board key required</string>
+    <string name="views_need_body">Open “Board key” and paste the key from your computer — then sections are shared.</string>
+    <string name="views_no_data">No data</string>
+    <string name="views_log_empty">Empty tail</string>
+    <string name="views_eta">%1$s left</string>
+    <string name="views_open">Open</string>
+    <string name="views_tasks">Tasks</string>
+    <string name="views_tasks_doing">in progress</string>
+    <string name="views_tasks_done">done</string>
+    <string name="views_tasks_total">total</string>
+    <string name="views_activity">Activity</string>
+    <string name="views_activity_hint">The activity feed lives on the Board tab.</string>
+    <string name="views_chart">Chart</string>
+
+    <string name="code_title">Code</string>
+    <string name="code_hint">document text…</string>
+    <string name="code_pull">Pull</string>
+    <string name="code_save">Save</string>
+    <string name="code_saving">saving…</string>
+    <string name="code_saved">saved · v%1$d</string>
+    <string name="code_took">pulled from server</string>
+    <string name="code_keep">your edits · saving overwrites v%1$d</string>
+    <string name="code_empty">Empty text is not saved</string>
+    <string name="code_not_found">Document not found</string>
+    <string name="code_http">Server replied %1$s</string>
+    <string name="code_pull_confirm">Pull the server version? Unsaved edits will be replaced.</string>
+    <string name="code_conflict_title">A newer version is on the server</string>
+    <string name="code_conflict_body">The computer already has version %1$d. Pull it or keep your edits — nothing is lost without your choice.</string>
+    <string name="code_conflict_take">Pull from server</string>
+    <string name="code_conflict_keep">Keep mine</string>
 </resources>

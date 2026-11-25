@@ -137,6 +137,18 @@
                 android:textSize="14sp"
                 android:textStyle="bold"
                 android:background="@drawable/nx_pill_off" />
+
+            <TextView
+                android:id="@+id/tab_views"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/tab_views"
+                android:textColor="?attr/nxTextDim"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:background="@drawable/nx_pill_off" />
         </LinearLayout>
 
         <HorizontalScrollView
@@ -221,7 +233,6 @@
                 android:layout_height="match_parent"
                 android:visibility="gone"
                 android:scrollbars="none">
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -405,6 +416,28 @@
                     </LinearLayout>
                 </LinearLayout>
             </androidx.core.widget.NestedScrollView>
+
+            <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                android:id="@+id/views_swipe"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone">
+
+                <androidx.core.widget.NestedScrollView
+                    android:id="@+id/views_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:scrollbars="none">
+
+                    <LinearLayout
+                        android:id="@+id/views_box"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingBottom="18dp" />
+                </androidx.core.widget.NestedScrollView>
+            </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
         </FrameLayout>
     </LinearLayout>
 </FrameLayout>

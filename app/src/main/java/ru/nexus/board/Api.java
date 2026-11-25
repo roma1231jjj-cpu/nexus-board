@@ -45,6 +45,24 @@ public final class Api {
         return out.toString("UTF-8");
     }
 
+    public static final class Reply {
+        public final int status;
+        public final String body;
+
+        Reply(int status, String body) {
+            this.status = status;
+            this.body = body == null ? "" : body;
+        }
+
+        public JSONObject json() {
+            try {
+                return new JSONObject(body);
+            } catch (Exception e) {
+                return new JSONObject();
+            }
+        }
+    }
+
     private static String withKey(String url, String key) {
         if (key == null || key.isEmpty()) return url;
         return url + (url.contains("?") ? "&" : "?") + "k=" + URLEncoder.encode(key);
@@ -61,6 +79,17 @@ public final class Api {
 
 
     public static JSONObject postJson(String url, String key, String jsonBody) throws IOException {
+        Reply r = post(url, key, jsonBody);
+        if (r.status == 401 || r.status == 403) throw new AuthException("auth");
+        if (r.status != 200) throw new IOException("HTTP " + r.status);
+        try {
+            return new JSONObject(r.body);
+        } catch (Exception e) {
+            throw new IOException("bad json");
+        }
+    }
+
+    public static Reply post(String url, String key, String jsonBody) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(withKey(url, key)).openConnection();
         c.setConnectTimeout(6000);
         c.setReadTimeout(9000);
@@ -85,12 +114,28 @@ public final class Api {
         }
         c.disconnect();
         if (code == 401 || code == 403) throw new AuthException("auth");
-        if (code != 200) throw new IOException("HTTP " + code);
+        return new Reply(code, out.toString("UTF-8"));
+    }
+
+    public static JSONObject views(String base, String board, String key) throws IOException {
+        return json(base, "/api/b/views?b=" + URLEncoder.encode(board), key);
+    }
+
+    public static JSONObject code(String base, String board, String key, String id) throws IOException {
+        return json(base, "/api/b/code?b=" + URLEncoder.encode(board)
+                + "&id=" + URLEncoder.encode(id), key);
+    }
+
+    public static Reply codeSave(String base, String board, String key, String id,
+                                 String content, int ifVersion) throws IOException {
+        JSONObject o = new JSONObject();
         try {
-            return new JSONObject(out.toString("UTF-8"));
-        } catch (Exception e) {
-            throw new IOException("bad json");
+            o.put("id", id);
+            o.put("content", content == null ? "" : content);
+            o.put("ifVersion", ifVersion);
+        } catch (Exception ignored) {
         }
+        return post(base + "/api/b/code/save?b=" + URLEncoder.encode(board), key, o.toString());
     }
 
     public static byte[] bytes(String url, String key) throws IOException {
