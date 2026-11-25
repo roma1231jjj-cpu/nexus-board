@@ -74,6 +74,7 @@ public class MainActivity extends AppCompatActivity {
     private volatile boolean viewsLoading = false;
     private boolean viewsReady = false;
     private String viewsVersion = "";
+    private String viewsSig = "";
     private int viewsCount = -1;
     private String pendingUpdate = null;
     private String pendingNotes = "";
@@ -246,6 +247,7 @@ public class MainActivity extends AppCompatActivity {
         }
         viewsLoading = true;
         if (force) viewsSwipe.setRefreshing(true);
+        if (force) viewsSig = "";
         pool.execute(() -> {
             JSONObject o = null;
             try {
@@ -291,11 +293,28 @@ public class MainActivity extends AppCompatActivity {
     private void renderViewsHint() {
         viewsReady = true;
         viewsVersion = "";
+        viewsSig = "";
         viewsCount = -1;
         viewsBox.removeAllViews();
         boolean noBoard = prefs.boardId().isEmpty();
         viewsBox.addView(hintCard(noBoard ? R.string.views_need_board : R.string.views_empty_title,
                 noBoard ? R.string.views_need_body : R.string.views_empty_body));
+    }
+
+    private String tasksSig() {
+        if (lastTasks == null) return "-";
+        JSONArray arr = lastTasks.optJSONArray("tasks");
+        int doing = 0, done = 0;
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject t = arr.optJSONObject(i);
+                if (t == null) continue;
+                String st = t.optString("Status", "todo");
+                if ("doing".equals(st)) doing++;
+                else if ("done".equals(st)) done++;
+            }
+        }
+        return (arr == null ? 0 : arr.length()) + "/" + doing + "/" + done;
     }
 
     private void renderViews(JSONObject o) {
@@ -309,11 +328,14 @@ public class MainActivity extends AppCompatActivity {
         }
         items.sort((a, b) -> Integer.compare(a.optInt("order", 0), b.optInt("order", 0)));
         String version = o.optString("version", "");
-        if (viewsReady && !version.isEmpty() && version.equals(viewsVersion) && items.size() == viewsCount) {
+        String sig = tasksSig();
+        if (viewsReady && !version.isEmpty() && version.equals(viewsVersion)
+                && items.size() == viewsCount && sig.equals(viewsSig)) {
             return;
         }
         viewsReady = true;
         viewsVersion = version;
+        viewsSig = sig;
         viewsCount = items.size();
         viewsBox.removeAllViews();
 
