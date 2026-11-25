@@ -350,6 +350,17 @@ namespace NexusBoard.Cli
             get { return System.Reflection.Assembly.GetExecutingAssembly().Location; }
         }
 
+        public static bool NoUi
+        {
+            get
+            {
+                string v = Environment.GetEnvironmentVariable("NEXUSBOARD_NO_UI");
+                if (string.IsNullOrEmpty(v)) return false;
+                v = v.Trim().ToLowerInvariant();
+                return v == "1" || v == "true" || v == "yes" || v == "on";
+            }
+        }
+
         public static bool IsRunning()
         {
             try
@@ -542,6 +553,13 @@ namespace NexusBoard.Cli
             catch (Exception e) { Out("ERR " + e.Message); return 1; }
         }
 
+        static bool NoUiFor(string[] args)
+        {
+            if (Ui.NoUi) return true;
+            for (int i = 0; i < args.Length; i++) if (args[i] == "--no-ui") return true;
+            return false;
+        }
+
         public static int Run(string[] args)
         {
             try { Console.OutputEncoding = new UTF8Encoding(false); } catch { }
@@ -549,8 +567,11 @@ namespace NexusBoard.Cli
             string cmd = "";
             for (int i = 0; i < args.Length; i++) { if (args[i].StartsWith("--")) { cmd = args[i].Substring(2).ToLowerInvariant(); break; } }
 
-            string[] autoUi = { "add", "plan", "start", "doing", "done", "block", "blocked", "drop", "dropped", "todo", "progress", "note", "log", "mode", "clear", "open" };
-            if (Array.IndexOf(autoUi, cmd) >= 0) try { Ui.Ensure(); } catch { }
+            if (cmd == "open" && !NoUiFor(args))
+            {
+                try { Ui.Ensure(); } catch { }
+                try { Ui.SignalShow(); } catch { }
+            }
 
             switch (cmd)
             {

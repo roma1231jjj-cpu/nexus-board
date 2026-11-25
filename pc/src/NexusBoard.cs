@@ -16,12 +16,12 @@ namespace NexusBoard
     static class Program
     {
         [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern bool SetForegroundWindow(IntPtr hWnd);
+        internal static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.0.4";
+        public const string Version = "2.0.5";
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
@@ -74,6 +74,7 @@ namespace NexusBoard
                 return;
             }
 
+            ServicePointManager.DefaultConnectionLimit = 8;
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11;
             try { ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true; } catch { }
 
@@ -237,7 +238,14 @@ namespace NexusBoard
                 return;
             }
 
+            var instance = NexusBoard.Cli.Ui.Acquire();
+            if (instance == null)
+            {
+                NexusBoard.Cli.Ui.SignalShow();
+                return;
+            }
             Application.Run(new MainForm());
+            GC.KeepAlive(instance);
         }
     }
 
@@ -413,6 +421,18 @@ namespace NexusBoard
         }
     }
 
+    class TimeoutWebClient : WebClient
+    {
+        public int TimeoutMs = 8000;
+
+        protected override WebRequest GetWebRequest(Uri address)
+        {
+            WebRequest r = base.GetWebRequest(address);
+            if (r != null) r.Timeout = TimeoutMs;
+            return r;
+        }
+    }
+
     class Api
     {
         public string Base;
@@ -425,7 +445,7 @@ namespace NexusBoard
 
         string Get(string path)
         {
-            using (var wc = new WebClient())
+            using (var wc = new TimeoutWebClient())
             {
                 wc.Encoding = Encoding.UTF8;
                 wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
@@ -435,7 +455,7 @@ namespace NexusBoard
 
         string Post(string path, string json)
         {
-            using (var wc = new WebClient())
+            using (var wc = new TimeoutWebClient { TimeoutMs = 15000 })
             {
                 wc.Encoding = Encoding.UTF8;
                 wc.Headers.Add("Content-Type", "application/json");
@@ -625,6 +645,27 @@ namespace NexusBoard
 
             BuildUi();
 
+            try
+            {
+                bool created;
+                var showEvt = new EventWaitHandle(false, EventResetMode.AutoReset, NexusBoard.Cli.Ui.ShowEventName, out created);
+                ThreadPool.RegisterWaitForSingleObject(showEvt, (s, timedOut) =>
+                {
+                    try
+                    {
+                        BeginInvoke((Action)(() =>
+                        {
+                            if (!Visible) Show();
+                            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                            Activate();
+                            Program.SetForegroundWindow(Handle);
+                        }));
+                    }
+                    catch { }
+                }, null, Timeout.Infinite, false);
+            }
+            catch { }
+
             Shown += (s, e) =>
             {
                 ApplyTheme();
@@ -649,6 +690,8 @@ namespace NexusBoard
             timer.Tick += (s, e) => { if (chatView) LoadChat(false); else if (trainView) LoadTrain(); else LoadBoard(); };
             timer.Start();
         }
+
+        int boardBusy, chatBusy, trainBusy;
 
         void BuildUi()
         {
@@ -1227,6 +1270,7 @@ namespace NexusBoard
         void LoadTrain()
         {
             if (string.IsNullOrEmpty(settings.Key)) return;
+            if (Interlocked.CompareExchange(ref trainBusy, 1, 0) == 1) return;
             api.Key = settings.Key;
             ThreadPool.QueueUserWorkItem(_ =>
             {
@@ -1244,6 +1288,7 @@ namespace NexusBoard
                 {
                     BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
                 }
+                finally { Interlocked.Exchange(ref trainBusy, 0); }
             });
         }
 
@@ -1323,40 +1368,53 @@ namespace NexusBoard
         void LoadChat(bool reset)
         {
             if (string.IsNullOrEmpty(boardId)) return;
-            try
+            if (reset)
             {
-                if (reset)
-                {
-                    chatMsgs.Clear();
-                    chatLast = 0;
-                }
-                var snap = api.ChatList(boardId, chatLast);
-                if (snap == null) return;
-                if (snap.ContainsKey("messages") && snap["messages"] is object[])
-                {
-                    foreach (var o in (object[])snap["messages"])
-                    {
-                        var d = o as Dictionary<string, object>;
-                        if (d == null) continue;
-                        var msg = new ChatMsg
-                        {
-                            Id = Str(d, "id"),
-                            From = Str(d, "from"),
-                            Text = Str(d, "text"),
-                            Ts = Convert.ToInt64(d.ContainsKey("ts") ? d["ts"] : 0L)
-                        };
-                        if (chatMsgs.Exists(x => x.Id == msg.Id)) continue;
-                        chatMsgs.Add(msg);
-                        if (msg.Ts > chatLast) chatLast = msg.Ts;
-                    }
-                }
-                if (chatMsgs.Count > 300) chatMsgs = chatMsgs.GetRange(chatMsgs.Count - 300, 300);
-                if (chatView) RenderChat();
-                lblSub.Text = chatLast > 0
-                    ? (L.Lang == "en" ? "chat · replies come from the AI" : "чат · отвечает ИИ")
-                    : (L.Lang == "en" ? "chat" : "чат");
+                chatMsgs.Clear();
+                chatLast = 0;
             }
-            catch { }
+            if (Interlocked.CompareExchange(ref chatBusy, 1, 0) == 1) return;
+            long since = chatLast;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    var snap = api.ChatList(boardId, since);
+                    if (snap == null) return;
+                    var fresh = new List<ChatMsg>();
+                    if (snap.ContainsKey("messages") && snap["messages"] is object[])
+                    {
+                        foreach (var o in (object[])snap["messages"])
+                        {
+                            var d = o as Dictionary<string, object>;
+                            if (d == null) continue;
+                            fresh.Add(new ChatMsg
+                            {
+                                Id = Str(d, "id"),
+                                From = Str(d, "from"),
+                                Text = Str(d, "text"),
+                                Ts = Convert.ToInt64(d.ContainsKey("ts") ? d["ts"] : 0L)
+                            });
+                        }
+                    }
+                    BeginInvoke((Action)(() =>
+                    {
+                        foreach (var msg in fresh)
+                        {
+                            if (chatMsgs.Exists(x => x.Id == msg.Id)) continue;
+                            chatMsgs.Add(msg);
+                            if (msg.Ts > chatLast) chatLast = msg.Ts;
+                        }
+                        if (chatMsgs.Count > 300) chatMsgs = chatMsgs.GetRange(chatMsgs.Count - 300, 300);
+                        if (chatView) RenderChat();
+                        lblSub.Text = chatLast > 0
+                            ? (L.Lang == "en" ? "chat · replies come from the AI" : "чат · отвечает ИИ")
+                            : (L.Lang == "en" ? "chat" : "чат");
+                    }));
+                }
+                catch { }
+                finally { Interlocked.Exchange(ref chatBusy, 0); }
+            });
         }
 
         void SendChat()
@@ -1492,6 +1550,7 @@ namespace NexusBoard
         void LoadBoard()
         {
             if (string.IsNullOrEmpty(boardId)) return;
+            if (Interlocked.CompareExchange(ref boardBusy, 1, 0) == 1) return;
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try
@@ -1541,6 +1600,7 @@ namespace NexusBoard
                 {
                     BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
                 }
+                finally { Interlocked.Exchange(ref boardBusy, 0); }
             });
         }
 

@@ -137,6 +137,7 @@ async function syncBoard() {
       cwd: "E:/Nexus-Board",
       timeout: 20000,
       windowsHide: true,
+      env: Object.assign({}, process.env, { NEXUSBOARD_NO_UI: "1" }),
     });
     fs.writeFileSync(marker, row, "utf8");
     try {
@@ -168,9 +169,9 @@ async function syncBoard() {
     if (prev23 !== row23) {
       try {
         if (!prev23) {
-          execFileSync("E:/Nexus-Board/pc/NexusBoard.exe", ["--start", "t23", "--note", note23], { cwd: "E:/Nexus-Board", timeout: 20000, windowsHide: true });
+          execFileSync("E:/Nexus-Board/pc/NexusBoard.exe", ["--start", "t23", "--note", note23], { cwd: "E:/Nexus-Board", timeout: 20000, windowsHide: true, env: Object.assign({}, process.env, { NEXUSBOARD_NO_UI: "1" }) });
         } else {
-          execFileSync("E:/Nexus-Board/pc/NexusBoard.exe", ["--progress", "t23", "--to", String(budgetPct), "--note", note23], { cwd: "E:/Nexus-Board", timeout: 20000, windowsHide: true });
+          execFileSync("E:/Nexus-Board/pc/NexusBoard.exe", ["--progress", "t23", "--to", String(budgetPct), "--note", note23], { cwd: "E:/Nexus-Board", timeout: 20000, windowsHide: true, env: Object.assign({}, process.env, { NEXUSBOARD_NO_UI: "1" }) });
         }
         fs.writeFileSync(marker23, row23, "utf8");
         log("доска: t23 → " + note23);
