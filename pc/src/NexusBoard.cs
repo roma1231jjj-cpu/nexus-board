@@ -603,13 +603,21 @@ namespace NexusBoard
             Base = baseUrl.TrimEnd('/');
         }
 
+        string WithKey(string path)
+        {
+            if (string.IsNullOrEmpty(Key)) return path;
+            if (path.Contains("k=")) return path;
+            if (!path.StartsWith("/api/b/") && !path.StartsWith("/api/c/")) return path;
+            return path + (path.Contains("?") ? "&" : "?") + "k=" + Uri.EscapeDataString(Key);
+        }
+
         string Get(string path)
         {
             using (var wc = new TimeoutWebClient())
             {
                 wc.Encoding = Encoding.UTF8;
                 wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
-                return wc.DownloadString(Base + path);
+                return wc.DownloadString(Base + WithKey(path));
             }
         }
 
@@ -620,7 +628,7 @@ namespace NexusBoard
                 wc.Encoding = Encoding.UTF8;
                 wc.Headers.Add("Content-Type", "application/json");
                 wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
-                return wc.UploadString(Base + path, json);
+                return wc.UploadString(Base + WithKey(path), json);
             }
         }
 
@@ -701,7 +709,7 @@ namespace NexusBoard
                 wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
                 try
                 {
-                    return wc.UploadString(Base + "/api/b/code/save?b=" + board, body);
+                    return wc.UploadString(Base + WithKey("/api/b/code/save?b=" + board), body);
                 }
                 catch (WebException e)
                 {
@@ -847,6 +855,7 @@ namespace NexusBoard
             L.Lang = settings.Lang == "en" ? "en" : "ru";
             th = Theme.Get(settings.Theme);
             api = new Api(settings.Base);
+            api.Key = settings.Key;
             boardId = settings.Board;
 
             Text = "Nexus Board";

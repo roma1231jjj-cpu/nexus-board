@@ -207,7 +207,14 @@ namespace NexusBoard.Cli
             string id = BoardId();
             if (string.IsNullOrEmpty(id)) return null;
             string sep = pathAndQuery.Contains("?") ? "&" : "?";
-            return ApiBase() + pathAndQuery + sep + "b=" + id;
+            string url = ApiBase() + pathAndQuery + sep + "b=" + id;
+            try
+            {
+                string k = (NexusBoard.Settings.Load().Key ?? "").Trim();
+                if (k.Length > 0) url += "&k=" + Uri.EscapeDataString(k);
+            }
+            catch (Exception) { }
+            return url;
         }
 
         static void PushBoard(Board b)

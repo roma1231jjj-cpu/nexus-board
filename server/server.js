@@ -390,7 +390,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     return res.end(gatePage());
   }
-  if (url !== "/api/health" && parsed.searchParams.get("k") === TOKEN && TOKEN && cookieValue(req, "nxt") !== TOKEN) {
+  const apiPass = url.startsWith("/api/b/") || url.startsWith("/api/c/") || url === "/api/views" || url === "/api/code" || url === "/api/tasks" || url === "/api/activity" || url === "/api/train";
+  if (!apiPass && url !== "/api/health" && parsed.searchParams.get("k") === TOKEN && TOKEN && cookieValue(req, "nxt") !== TOKEN) {
     res.writeHead(302, {
       "Set-Cookie": `nxt=${TOKEN}; Path=/; Max-Age=31536000; SameSite=Lax`,
       Location: req.url,
@@ -452,13 +453,24 @@ const server = http.createServer((req, res) => {
       fs.renameSync(tmp, target);
     };
 
+    const boardKey = (parsed.searchParams.get("k") || cookieValue(req, "nxt") || "").trim();
+
     if (url === "/api/b/new" && req.method === "POST") {
       const id = crypto.randomBytes(8).toString("hex");
-      save({ id, created: new Date().toISOString(), updated: "", tasks: [], sections: [] });
+      const fresh = { id, created: new Date().toISOString(), updated: "", tasks: [], sections: [], blocks: [] };
+      if (/^[A-Za-z0-9_-]{8,64}$/.test(boardKey)) fresh.key = boardKey;
+      save(fresh);
       return json(res, 200, { ok: true, id });
     }
 
     if (!okId) return json(res, 400, { ok: false, error: "bad board id" });
+
+    {
+      const probe = load();
+      if (probe && probe.key && probe.key !== boardKey) {
+        return json(res, 401, { ok: false, error: "bad key" });
+      }
+    }
 
     if (url === "/api/b/seed" && req.method === "POST") {
       const data = load();
