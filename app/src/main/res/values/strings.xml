@@ -5,18 +5,10 @@
     <string name="tab_train">Обучение</string>
     <string name="updated">обновлено %1$s</string>
     <string name="loading">загружаю…</string>
-    <string name="refresh">Обновить</string>
-    <string name="theme">Тема</string>
-    <string name="language">Язык</string>
-    <string name="theme_midnight">Полночь</string>
-    <string name="theme_frost">Иней</string>
-    <string name="theme_graphite">Графит</string>
     <string name="sec_now">Сейчас</string>
     <string name="sec_next">Дальше</string>
     <string name="sec_wait">Ждёт</string>
     <string name="sec_done">Готово</string>
-    <string name="empty_board">Задач пока нет</string>
-    <string name="train_run">Прогон</string>
     <string name="train_step">Шаг</string>
     <string name="train_rate">Скорость</string>
     <string name="train_loss">Loss</string>
@@ -38,7 +30,6 @@
     <string name="all_sections">Всё</string>
     <string name="connect">Подключение</string>
     <string name="connect_title">Как подключить доску</string>
-    <string name="connect_body">1. Это ваша личная доска. Её ключ — ниже.\n2. Вставьте тот же ключ на компьютере (меню ⋯ → Настройки) или на телефоне (долгое нажатие по заголовку) — оба устройства покажут одну доску.\n3. Заполнять её может ваш ИИ: POST /api/b/add?b=КЛЮЧ с полями title, note, status, progress.\n4. Данные идут через сайт, поэтому работает в любой сети, а не только дома.</string>
     <string name="copy_key">Скопировать</string>
     <string name="paste_key">Вставить из буфера</string>
     <string name="apply_key">Подключить</string>
@@ -46,11 +37,10 @@
     <string name="key_bad">Нужен ключ из 16 символов (0-9, a-f)</string>
     <string name="key_empty_clip">В буфере нет текста</string>
     <string name="key_copied">Ключ скопирован</string>
-    <string name="refresh_every">обновляется каждые 10 с</string>
     <string name="close">Закрыть</string>
 
     <string name="empty_title">Пока пусто</string>
-    <string name="empty_body">Это ваша личная доска. Её заполняет ваш ИИ через API — или добавьте задачу сами: долгое нажатие по этому экрану.</string>
+    <string name="empty_body">Это ваша личная доска. Её заполняет ваш ИИ через API — или добавьте задачу сами: долгое нажатие по пустому месту. Нажми на карточку — покажу задачу целиком, долгое нажатие по карточке — правка. Долгое нажатие по «Всё» — новый раздел.</string>
 
     <string name="train_log">Хвост лога</string>
     <string name="f_server">Адрес сервера</string>
@@ -111,4 +101,53 @@
     <string name="code_conflict_body">На компьютере уже версия %1$d. Забери её или оставь свои правки — без твоего выбора ничего не потеряется.</string>
     <string name="code_conflict_take">Забрать с сервера</string>
     <string name="code_conflict_keep">Оставить мои</string>
+
+    <string name="save">Сохранить</string>
+    <string name="delete">Удалить</string>
+    <string name="edit">Изменить</string>
+    <string name="task_new">Новая задача</string>
+    <string name="task_edit">Правка задачи</string>
+    <string name="task_full_title">Задача</string>
+    <string name="task_meta">%1$s · режим %2$s · %3$d%%</string>
+    <string name="task_no_note">Заметки нет</string>
+    <string name="task_need_title">Нужен заголовок</string>
+    <string name="task_saved">Задача сохранена</string>
+    <string name="task_added">Задача добавлена</string>
+    <string name="task_deleted">Задача удалена</string>
+    <string name="task_gone">Задачи уже нет на доске</string>
+    <string name="need_board">Сначала подключи доску</string>
+    <string name="delete_unsupported">Сервер не поддерживает удаление</string>
+    <string name="server_reply">Сервер ответил %1$s</string>
+    <string name="f_task_title">Заголовок</string>
+    <string name="f_task_title_hint">что нужно сделать</string>
+    <string name="f_task_note">Заметка</string>
+    <string name="f_task_note_hint">детали, ссылки, что уже сделано</string>
+    <string name="f_task_section">Раздел</string>
+    <string name="f_task_status">Статус</string>
+    <string name="f_task_mode">Режим</string>
+    <string name="f_task_progress">Прогресс</string>
+    <string name="pct_value">%1$d%%</string>
+    <string name="no_section">Без раздела</string>
+    <string name="section_new">Новый раздел</string>
+    <string name="section_rename">Переименовать раздел</string>
+    <string name="section_delete">Удалить раздел</string>
+    <string name="section_actions">Действия</string>
+    <string name="section_actions_all">Доска</string>
+    <string name="section_name_hint">название раздела</string>
+    <string name="section_need_name">Нужно название</string>
+    <string name="section_created">Раздел создан</string>
+    <string name="section_renamed">Раздел переименован</string>
+    <string name="section_deleted">Раздел удалён</string>
+    <string name="section_delete_confirm">Удалить раздел «%1$s»? Задачи останутся на доске и перейдут в первый раздел.</string>
+    <string name="board_new">Новая доска создана</string>
+    <string name="board_bad">Ключ доски — 16 символов (0-9, a-f) или пусто для новой доски</string>
+    <string name="copy_empty">Сначала введи ключ</string>
+    <string name="update_dialog_title">Обновление %1$s</string>
+    <string name="update_no_notes">Описание не приложено.</string>
+    <string name="update_no_sha">В описании обновления нет SHA-256 — установка отменена</string>
+    <string name="update_sha_bad">Файл повреждён: SHA-256 не совпал</string>
+    <string name="install_denied_title">Нужно разрешение на установку</string>
+    <string name="install_denied_body">Разреши «Установку неизвестных приложений» для Nexus Board, потом нажми ↓ ещё раз.</string>
+    <string name="install_settings">Открыть настройки</string>
+    <string name="install_failed">Не удалось открыть установщик</string>
 </resources>

@@ -57,7 +57,7 @@ Public address: `https://board.nexus-your-heper.ru`. No account needed, only the
 
 ```bash
 curl -X POST https://board.nexus-your-heper.ru/api/b/new
-# → {"ok":true,"id":"7140a973cfe1946d"}
+# → {"ok":true,"id":"0123456789abcdef"}
 ```
 
 All further requests carry that `id` in the `b` parameter:

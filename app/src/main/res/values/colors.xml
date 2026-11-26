@@ -13,9 +13,9 @@
     <color name="mid_blob3">#2E6D28D9</color>
 
     <color name="fr_bg">#FFF4F7FF</color>
-    <color name="fr_surface">#FFFFFFFF</color>
+    <color name="fr_surface">#FFE3E9F7</color>
     <color name="fr_card">#FFFFFFFF</color>
-    <color name="fr_stroke">#22102040</color>
+    <color name="fr_stroke">#2E102040</color>
     <color name="fr_primary">#FF2563EB</color>
     <color name="fr_on_primary">#FFFFFFFF</color>
     <color name="fr_text">#FF101828</color>

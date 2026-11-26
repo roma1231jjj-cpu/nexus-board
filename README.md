@@ -15,7 +15,7 @@ Nexus × АутSquad · RU/EN · три темы · без аккаунтов и
 
 1. Ставите приложение на телефон и/или ПК.
 2. При первом запуске создаётся **личная доска** и показывается её ключ из 16 символов.
-3. Вставляете этот же ключ во второе приложение (на телефоне — долгое нажатие по заголовку, «Ключ доски»).
+3. Вставляете этот же ключ во второе приложение (на телефоне — долгое нажатие по строке «обновлено» внизу, «Ключ доски»).
 4. Дальше доску наполняет ваш ИИ: он создаёт разделы-вкладки и задачи обычными HTTP-запросами.
 
 Ни регистрации, ни пароля, ни привязки к нашему аккаунту: ключ — единственное, что связывает устройства.
@@ -25,14 +25,14 @@ Nexus × АутSquad · RU/EN · три темы · без аккаунтов и
 | Файл | Что это |
 |---|---|
 | `NexusBoard.exe` | Портативная сборка, ничего не устанавливает |
-| `NexusBoard-portable-1.3.1.zip` | Она же плюс README-EN |
+| `NexusBoard-portable.zip` | Она же плюс README |
 | `NexusBoard-setup.exe` | Установщик: копирует в `%LOCALAPPDATA%\NexusBoard`, делает ярлыки на рабочем столе и в «Пуске», добавляет запись в «Удаление программ» |
 
-Windows 7+ и .NET Framework 4.7+ (в Windows 10/11 уже есть). Когда выходит новая версия, в шапке появляется кнопка обновления.
+Windows 10/11 и .NET Framework 4.8 (в Windows 10/11 уже есть). Кнопка обновления появляется в шапке только когда новая версия действительно есть, а скачанный файл проверяется по SHA-256 и подписи.
 
 ## Телефон
 
-Android 7+. APK обновляется сам, доска и обучение обновляются каждые 10 секунд, пока приложение открыто.
+Android 13+ (`minSdk 33`). Доска и обучение обновляются каждые 10 секунд, пока приложение открыто; обновление APK предлагается вручную и проверяется по SHA-256.
 
 ## Что умеет
 
@@ -50,13 +50,13 @@ Android 7+. APK обновляется сам, доска и обучение о
 
 Публичный адрес: `https://board.nexus-your-heper.ru`. Аккаунт не нужен, нужен только ключ доски.
 
-**Вариант 1 — доска уже создана приложением.** Ключ виден на экране «Подключение» (на телефоне — долгое нажатие по надписи «обновлено»). Отдайте ключ своему ИИ или второй программе, и она работает с той же доской.
+**Вариант 1 — доска уже создана приложением.** Ключ виден на экране «Подключение» (на телефоне — долгое нажатие по строке «обновлено»). Отдайте ключ своему ИИ или второй программе, и она работает с той же доской.
 
 **Вариант 2 — доска для стороннего клиента.** Любой клиент создаёт себе доску сам:
 
 ```bash
-curl -X POST https://board.nexus-your-heper.ru/api/b/new
-# → {"ok":true,"id":"7140a973cfe1946d"}
+curl -X POST https://board.nexus-your-heper.ru/api/b/new -H "Content-Type: application/json" -d '{"key":"придумайте-свой-секрет"}'
+# → {"ok":true,"id":"<16 hex, ваш id>"}
 ```
 
 Дальше все запросы идут с этим `id` в параметре `b`:
@@ -125,7 +125,7 @@ NexusBoard.exe --code-pull <id> [--out E:\patch.diff]
 
 1. Install the app on the phone and/or the PC.
 2. On first launch a **personal board** is created and its 16-character key is shown.
-3. Paste that key into the other app (phone: long-press the title → board key field). Both now share one board.
+3. Paste that key into the other app (phone: long-press the “updated” line at the bottom → board key field). Both now share one board.
 4. Your AI fills it and creates section tabs through a tiny HTTP API.
 
 **Three ways to install on PC:**
@@ -133,12 +133,12 @@ NexusBoard.exe --code-pull <id> [--out E:\patch.diff]
 | File | What it is |
 |---|---|
 | `NexusBoard.exe` | Portable build. Run it, nothing is installed. |
-| `NexusBoard-portable-1.3.1.zip` | Portable build plus README-EN. |
+| `NexusBoard-portable.zip` | Portable build plus README. |
 | `NexusBoard-setup.exe` | Installer: copies to `%LOCALAPPDATA%\NexusBoard`, adds desktop and Start-menu shortcuts and an uninstall entry. |
 
-Windows 7+ with .NET Framework 4.7+ (already present in Windows 10/11). The header shows an update button when a newer build is available.
+Windows 10/11 with .NET Framework 4.8 (already present). The update button appears only when a newer build exists, and the downloaded file is checked against SHA-256 and the app signature.
 
-Android 7+. The board refreshes every 10 seconds while the app is open, and the APK updates itself.
+Android 13+ (`minSdk 33`). The board refreshes every 10 seconds while the app is open; APK updates are offered manually and checked against SHA-256.
 
 Features: section tabs (Training, Sales, Home — created by your AI or with “+ Section”), Now / Next / Waiting / Done columns with notes and progress, three named themes (Midnight, Frost, Graphite), Russian and English UI with an instant switch, a Connection screen with copyable keys, and one-click update on both platforms.
 
@@ -149,8 +149,8 @@ Public endpoint: `https://board.nexus-your-heper.ru`. No account, only the board
 A board is either created by the app (its key is on the Connection screen) or by any client:
 
 ```bash
-curl -X POST https://board.nexus-your-heper.ru/api/b/new
-# → {"ok":true,"id":"7140a973cfe1946d"}
+curl -X POST https://board.nexus-your-heper.ru/api/b/new -H "Content-Type: application/json" -d '{"key":"придумайте-свой-секрет"}'
+# → {"ok":true,"id":"<16 hex, ваш id>"}
 ```
 
 Then use that `id` as the `b` parameter:
@@ -167,14 +167,17 @@ curl "https://board.nexus-your-heper.ru/api/b/section?b=<id>"
 curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 ```
 
-`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board. The key is the whole authorisation: whoever knows it sees the board. Nothing else about the user is stored, no tracking, only tasks and sections are served.
+`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board. The key is the whole authorisation: whoever knows it sees the board — keep it private and do not commit it to git. Nothing else about the user is stored, no tracking, only tasks and sections are served.
 
 **Your own server:** the backend ships in this same repo, folder `server`, no database.
 
 ```bash
-node server.js                          # port 8788, boards in site/boards/*.json
+cd server
+node server.js                          # port 8788, boards in server/boards/*.json
 NEXUS_SITE_PORT=9000 node server.js
 ```
+
+Site access uses a separate token in `server/token.txt` (or `NEXUS_SITE_TOKEN`); without it the site is open only to localhost.
 
 Change the server address in the app settings (PC: `⋯` → Settings, phone: long-press the title) and everything else stays the same.
 ## Чат с ИИ и подключение ключом

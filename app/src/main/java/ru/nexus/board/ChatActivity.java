@@ -28,6 +28,7 @@ import java.util.concurrent.Executors;
 public class ChatActivity extends AppCompatActivity {
 
     private static final long POLL_MS = 5000L;
+    private static final long OVERLAP_MS = 5000L;
     private static final int MAX_TEXT = 4000;
 
     private Prefs prefs;
@@ -73,7 +74,9 @@ public class ChatActivity extends AppCompatActivity {
         findViewById(R.id.btn_send).setOnClickListener(v -> send());
 
         input.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
+            if (actionId == EditorInfo.IME_ACTION_SEND
+                    || actionId == EditorInfo.IME_ACTION_DONE
+                    || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
                 send();
                 return true;
             }
@@ -98,6 +101,23 @@ public class ChatActivity extends AppCompatActivity {
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
         cfg.setLocale(new Locale(tag));
         super.attachBaseContext(base.createConfigurationContext(cfg));
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration next) {
+        super.onConfigurationChanged(next);
+        if (adapter != null) adapter.resetMaxWidth();
+    }
+
+    private boolean alive() {
+        return !isFinishing() && !isDestroyed();
+    }
+
+    private void uiPost(Runnable r) {
+        ui.post(() -> {
+            if (!alive()) return;
+            r.run();
+        });
     }
 
     private int warningColor() {
@@ -130,33 +150,39 @@ public class ChatActivity extends AppCompatActivity {
 
     private void refresh() {
         final String board = prefs.boardId();
-        if (board.isEmpty()) {
+        if (!Prefs.validBoardId(board)) {
             if (boardTried) {
                 showStatus(R.string.chat_need_board, this::refresh);
                 updateEmpty();
                 return;
             }
             boardTried = true;
-            registerBoard();
+            ensureBoard();
             return;
         }
         if (loading) return;
         loading = true;
         final String base = prefs.base();
-        final long since = last;
+        final long since = last > OVERLAP_MS ? last - OVERLAP_MS : 0L;
         pool.execute(() -> {
             JSONArray messages = null;
-            long next = since;
+            long maxTs = since;
             try {
                 JSONObject o = Api.json(base, "/api/c/list?board=" + board + "&since=" + since + "&limit=200", "");
                 messages = o.optJSONArray("messages");
-                long l = o.optLong("last", 0L);
-                if (l > next) next = l;
+                if (messages != null) {
+                    for (int i = 0; i < messages.length(); i++) {
+                        JSONObject m = messages.optJSONObject(i);
+                        if (m == null) continue;
+                        long ts = m.optLong("ts", 0L);
+                        if (ts > maxTs) maxTs = ts;
+                    }
+                }
             } catch (Exception ignored) {
             }
             final JSONArray fMessages = messages;
-            final long fNext = next;
-            ui.post(() -> {
+            final long fNext = maxTs;
+            uiPost(() -> {
                 loading = false;
                 if (fMessages == null) {
                     showStatus(R.string.chat_net_error, this::refresh);
@@ -172,23 +198,17 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
-    private void registerBoard() {
-        final String base = prefs.base();
+    /** Общая доска: не создаём свою, если MainActivity уже её создала. */
+    private void ensureBoard() {
         pool.execute(() -> {
-            String id = "";
-            try {
-                JSONObject o = Api.postJson(base + "/api/b/new", "", "{}");
-                id = o.optString("id", "");
-            } catch (Exception ignored) {
-            }
-            final String fId = id;
-            ui.post(() -> {
-                if (fId.isEmpty()) {
+            final String id = Prefs.ensureBoard(ChatActivity.this);
+            uiPost(() -> {
+                if (id.isEmpty()) {
                     showStatus(R.string.chat_net_error, this::refresh);
                     updateEmpty();
                     return;
                 }
-                prefs.boardId(fId);
+                boardTried = false;
                 refresh();
             });
         });
@@ -202,11 +222,21 @@ public class ChatActivity extends AppCompatActivity {
             String id = m.optString("id", "");
             if (id.isEmpty()) id = m.optString("from", "x") + "-" + m.optLong("ts", 0L);
             if (!seen.add(id)) continue;
+            String from = m.optString("from", "");
+            String text = m.optString("text", "");
+            long ts = m.optLong("ts", 0L);
+            if ("owner".equals(from)) {
+                ChatAdapter.Msg tmpMsg = adapter.takePending(text, ts);
+                if (tmpMsg != null) {
+                    seen.remove(tmpMsg.id);
+                    adapter.remove(tmpMsg);
+                }
+            }
             ChatAdapter.Msg msg = new ChatAdapter.Msg();
             msg.id = id;
-            msg.owner = "owner".equals(m.optString("from", ""));
-            msg.text = m.optString("text", "");
-            msg.ts = m.optLong("ts", 0L);
+            msg.owner = "owner".equals(from);
+            msg.text = text;
+            msg.ts = ts;
             adapter.add(msg);
             added = true;
         }
@@ -217,7 +247,7 @@ public class ChatActivity extends AppCompatActivity {
         final String text = input.getText().toString().trim();
         if (text.isEmpty()) return;
         final String board = prefs.boardId();
-        if (board.isEmpty()) {
+        if (!Prefs.validBoardId(board)) {
             showStatus(R.string.chat_need_board, this::refresh);
             return;
         }
@@ -250,7 +280,7 @@ public class ChatActivity extends AppCompatActivity {
             }
             final String fId = realId;
             final long fTs = ts;
-            ui.post(() -> {
+            uiPost(() -> {
                 if (fId.isEmpty()) {
                     adapter.remove(msg);
                     seen.remove(msg.id);
@@ -266,7 +296,6 @@ public class ChatActivity extends AppCompatActivity {
                 msg.id = fId;
                 msg.pending = false;
                 msg.ts = fTs;
-                if (fTs > last) last = fTs;
                 adapter.touch();
                 refresh();
             });
@@ -276,6 +305,7 @@ public class ChatActivity extends AppCompatActivity {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
+            if (!alive()) return;
             refresh();
             ui.postDelayed(this, POLL_MS);
         }
@@ -297,8 +327,8 @@ public class ChatActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        ui.removeCallbacks(tick);
-        super.onDestroy();
+        ui.removeCallbacksAndMessages(null);
         pool.shutdownNow();
+        super.onDestroy();
     }
 }

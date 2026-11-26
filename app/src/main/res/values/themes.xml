@@ -1,15 +1,76 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Nexus.Dialog" parent="Theme.AppCompat.Dialog.Alert">
+    <!-- Диалог живёт в своей теме, поэтому цвета nx* объявлены и здесь. -->
+    <style name="Nexus.Dialog.Midnight" parent="Theme.AppCompat.Dialog.Alert">
         <item name="android:windowBackground">@drawable/nx_card</item>
         <item name="android:textColorPrimary">?attr/nxText</item>
         <item name="android:textColorSecondary">?attr/nxTextDim</item>
-        <item name="colorAccent">?attr/nxPrimary</item>
+        <item name="android:editTextColor">@color/mid_text</item>
+        <item name="android:textColorHint">@color/mid_text_dim</item>
+        <item name="colorAccent">@color/mid_primary</item>
+        <item name="colorControlNormal">@color/mid_text_dim</item>
+        <item name="colorControlActivated">@color/mid_primary</item>
         <item name="android:backgroundDimAmount">0.62</item>
+        <item name="nxBg">@color/mid_bg</item>
+        <item name="nxSurface">@color/mid_surface</item>
+        <item name="nxCard">@color/mid_card</item>
+        <item name="nxStroke">@color/mid_stroke</item>
+        <item name="nxPrimary">@color/mid_primary</item>
+        <item name="nxOnPrimary">@color/mid_on_primary</item>
+        <item name="nxText">@color/mid_text</item>
+        <item name="nxTextDim">@color/mid_text_dim</item>
+        <item name="nxBlob1">@color/mid_blob1</item>
+        <item name="nxBlob2">@color/mid_blob2</item>
+        <item name="nxBlob3">@color/mid_blob3</item>
+    </style>
+
+    <style name="Nexus.Dialog.Frost" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/nx_card</item>
+        <item name="android:textColorPrimary">?attr/nxText</item>
+        <item name="android:textColorSecondary">?attr/nxTextDim</item>
+        <item name="android:editTextColor">@color/fr_text</item>
+        <item name="android:textColorHint">@color/fr_text_dim</item>
+        <item name="colorAccent">@color/fr_primary</item>
+        <item name="colorControlNormal">@color/fr_text_dim</item>
+        <item name="colorControlActivated">@color/fr_primary</item>
+        <item name="android:backgroundDimAmount">0.45</item>
+        <item name="nxBg">@color/fr_bg</item>
+        <item name="nxSurface">@color/fr_surface</item>
+        <item name="nxCard">@color/fr_card</item>
+        <item name="nxStroke">@color/fr_stroke</item>
+        <item name="nxPrimary">@color/fr_primary</item>
+        <item name="nxOnPrimary">@color/fr_on_primary</item>
+        <item name="nxText">@color/fr_text</item>
+        <item name="nxTextDim">@color/fr_text_dim</item>
+        <item name="nxBlob1">@color/fr_blob1</item>
+        <item name="nxBlob2">@color/fr_blob2</item>
+        <item name="nxBlob3">@color/fr_blob3</item>
+    </style>
+
+    <style name="Nexus.Dialog.Graphite" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/nx_card</item>
+        <item name="android:textColorPrimary">?attr/nxText</item>
+        <item name="android:textColorSecondary">?attr/nxTextDim</item>
+        <item name="android:editTextColor">@color/gr_text</item>
+        <item name="android:textColorHint">@color/gr_text_dim</item>
+        <item name="colorAccent">@color/gr_primary</item>
+        <item name="colorControlNormal">@color/gr_text_dim</item>
+        <item name="colorControlActivated">@color/gr_primary</item>
+        <item name="android:backgroundDimAmount">0.62</item>
+        <item name="nxBg">@color/gr_bg</item>
+        <item name="nxSurface">@color/gr_surface</item>
+        <item name="nxCard">@color/gr_card</item>
+        <item name="nxStroke">@color/gr_stroke</item>
+        <item name="nxPrimary">@color/gr_primary</item>
+        <item name="nxOnPrimary">@color/gr_on_primary</item>
+        <item name="nxText">@color/gr_text</item>
+        <item name="nxTextDim">@color/gr_text_dim</item>
+        <item name="nxBlob1">@color/gr_blob1</item>
+        <item name="nxBlob2">@color/gr_blob2</item>
+        <item name="nxBlob3">@color/gr_blob3</item>
     </style>
 
     <style name="Base.Nexus" parent="Theme.AppCompat.NoActionBar">
-        <item name="alertDialogTheme">@style/Nexus.Dialog</item>
         <item name="android:windowBackground">?attr/nxBg</item>
         <item name="android:statusBarColor">?attr/nxBg</item>
         <item name="android:navigationBarColor">?attr/nxBg</item>
@@ -18,6 +79,7 @@
     </style>
 
     <style name="Nexus.Midnight" parent="Base.Nexus">
+        <item name="alertDialogTheme">@style/Nexus.Dialog.Midnight</item>
         <item name="nxBg">@color/mid_bg</item>
         <item name="nxSurface">@color/mid_surface</item>
         <item name="nxCard">@color/mid_card</item>
@@ -30,10 +92,13 @@
         <item name="nxBlob2">@color/mid_blob2</item>
         <item name="nxBlob3">@color/mid_blob3</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:editTextColor">@color/mid_text</item>
+        <item name="android:textColorHint">@color/mid_text_dim</item>
         <item name="colorAccent">@color/mid_primary</item>
     </style>
 
     <style name="Nexus.Frost" parent="Base.Nexus">
+        <item name="alertDialogTheme">@style/Nexus.Dialog.Frost</item>
         <item name="nxBg">@color/fr_bg</item>
         <item name="nxSurface">@color/fr_surface</item>
         <item name="nxCard">@color/fr_card</item>
@@ -47,10 +112,13 @@
         <item name="nxBlob3">@color/fr_blob3</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:editTextColor">@color/fr_text</item>
+        <item name="android:textColorHint">@color/fr_text_dim</item>
         <item name="colorAccent">@color/fr_primary</item>
     </style>
 
     <style name="Nexus.Graphite" parent="Base.Nexus">
+        <item name="alertDialogTheme">@style/Nexus.Dialog.Graphite</item>
         <item name="nxBg">@color/gr_bg</item>
         <item name="nxSurface">@color/gr_surface</item>
         <item name="nxCard">@color/gr_card</item>
@@ -63,6 +131,8 @@
         <item name="nxBlob2">@color/gr_blob2</item>
         <item name="nxBlob3">@color/gr_blob3</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:editTextColor">@color/gr_text</item>
+        <item name="android:textColorHint">@color/gr_text_dim</item>
         <item name="colorAccent">@color/gr_primary</item>
     </style>
 </resources>

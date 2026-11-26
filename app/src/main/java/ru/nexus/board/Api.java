@@ -3,11 +3,14 @@ package ru.nexus.board;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.security.MessageDigest;
 
 public final class Api {
 
@@ -136,6 +139,54 @@ public final class Api {
         } catch (Exception ignored) {
         }
         return post(base + "/api/b/code/save?b=" + URLEncoder.encode(board), key, o.toString());
+    }
+
+    /** Качает файл потоком на диск и возвращает его SHA-256 в hex. */
+    public static String download(String url, String key, File out) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(withKey(url, key)).openConnection();
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(30000);
+        if (key != null && !key.isEmpty()) c.setRequestProperty("Cookie", "nxt=" + key);
+        int code = c.getResponseCode();
+        if (code == 401 || code == 403) {
+            c.disconnect();
+            throw new AuthException("auth");
+        }
+        if (code != 200) {
+            c.disconnect();
+            throw new IOException("HTTP " + code);
+        }
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (Exception e) {
+            c.disconnect();
+            throw new IOException("no sha256");
+        }
+        InputStream in = c.getInputStream();
+        FileOutputStream fos = new FileOutputStream(out);
+        try {
+            byte[] buf = new byte[16384];
+            int r;
+            while ((r = in.read(buf)) > 0) {
+                fos.write(buf, 0, r);
+                md.update(buf, 0, r);
+            }
+            fos.flush();
+        } finally {
+            try {
+                fos.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                in.close();
+            } catch (Exception ignored) {
+            }
+            c.disconnect();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : md.digest()) sb.append(String.format("%02x", b));
+        return sb.toString();
     }
 
     public static byte[] bytes(String url, String key) throws IOException {

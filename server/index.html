@@ -111,7 +111,7 @@
       <div class="mark">N</div>
       <div>
         <h1 data-i18n="title">Nexus · Доска задач</h1>
-        <div class="sub"><span data-i18n="subtitle">сайт только для просмотра · данные читаются с</span> <code style="color:#8f88a8">E:\Nexus-Board\data\tasks.json</code></div>
+        <div class="sub"><span data-i18n="subtitle">сайт только для просмотра · данные: tasks.json</span></div>
       </div>
     </div>
     <div class="spacer"></div>
@@ -137,7 +137,7 @@ const DICT = {
   ru: {
     docTitle: "Nexus · Доска задач",
     title: "Nexus · Доска задач",
-    subtitle: "сайт только для просмотра · данные читаются с",
+    subtitle: "сайт только для просмотра · данные: tasks.json",
     modeWord: "режим",
     feedTitle: "Лента событий (последние 40)",
     feedEmpty: "пока пусто",
@@ -159,7 +159,7 @@ const DICT = {
   en: {
     docTitle: "Nexus · Task board",
     title: "Nexus · Task board",
-    subtitle: "view-only site · data is read from",
+    subtitle: "view-only site · data: tasks.json",
     modeWord: "mode",
     feedTitle: "Activity feed (last 40)",
     feedEmpty: "nothing yet",
@@ -347,6 +347,21 @@ async function feed(){
   }catch{}
 }
 
+// запросы не наслаиваются: один тик до завершения предыдущего
+const inFlight = new Set();
+async function runOnce(name, fn){
+  if (inFlight.has(name)) return;
+  inFlight.add(name);
+  try { await fn(); } finally { inFlight.delete(name); }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function pump(name, fn, ms){
+  for (;;){
+    if (!document.hidden) await runOnce(name, fn);
+    await sleep(ms);
+  }
+}
+
 applyStatic();
 document.getElementById("langBtn").onclick = () => {
   const next = boardLang() === "ru" ? "en" : "ru";
@@ -355,14 +370,13 @@ document.getElementById("langBtn").onclick = () => {
   url.searchParams.set("lang", next);
   history.replaceState(null, "", url);
   applyStatic();
-  tick();
-  feed();
-  viewsTick();
+  runOnce("tick", tick);
+  runOnce("feed", feed);
+  runOnce("views", viewsTick);
 };
-tick(); feed(); viewsTick();
-setInterval(tick, 2000);
-setInterval(feed, 6000);
-setInterval(viewsTick, 5000);
+pump("tick", tick, 2000);
+pump("feed", feed, 6000);
+pump("views", viewsTick, 5000);
 </script>
 </body>
 </html>

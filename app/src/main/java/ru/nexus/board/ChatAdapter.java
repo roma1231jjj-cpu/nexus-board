@@ -47,6 +47,23 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.MsgHolder> {
         notifyDataSetChanged();
     }
 
+    /** Ширина пузыря зависит от ширины экрана: пересчитать при смене ориентации. */
+    public void resetMaxWidth() {
+        maxWidth = 0;
+        notifyDataSetChanged();
+    }
+
+    /** Оптимистичное сообщение, которое сервер уже подтвердил (тот же текст и ts >=). */
+    public Msg takePending(String text, long ts) {
+        for (int i = items.size() - 1; i >= 0; i--) {
+            Msg m = items.get(i);
+            if (!m.pending || !m.owner) continue;
+            if (m.text == null || !m.text.equals(text)) continue;
+            if (m.ts <= ts + 120000L) return m;
+        }
+        return null;
+    }
+
     @Override
     public int getItemCount() {
         return items.size();

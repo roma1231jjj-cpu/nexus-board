@@ -14,6 +14,12 @@ import java.util.List;
 
 public class BoardAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
+    interface Listener {
+        void onTaskClick(Task t);
+
+        void onTaskLongClick(Task t);
+    }
+
     static class Section {
         final String name;
         final int count;
@@ -25,16 +31,24 @@ public class BoardAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
     }
 
     static class Task {
+        String id;
         String title;
         String note;
         String chip;
+        String status;
+        String mode;
+        String section;
         int progress;
-        String id;
     }
 
     private static final int T_SECTION = 0;
     private static final int T_TASK = 1;
     private final List<Object> items = new ArrayList<>();
+    private Listener listener;
+
+    public void setListener(Listener l) {
+        listener = l;
+    }
 
     public void setItems(List<Object> next) {
         items.clear();
@@ -72,7 +86,7 @@ public class BoardAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             h.count.setText(String.valueOf(s.count));
         } else if (holder instanceof TaskHolder && o instanceof Task) {
             TaskHolder h = (TaskHolder) holder;
-            Task t = (Task) o;
+            final Task t = (Task) o;
             h.title.setText(t.title);
             h.chip.setText(t.chip);
             h.chip.setVisibility(t.chip == null || t.chip.isEmpty() ? View.GONE : View.VISIBLE);
@@ -84,6 +98,14 @@ public class BoardAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> 
             }
             h.bar.setProgress(Math.max(0, Math.min(100, t.progress)));
             h.pct.setText(t.progress + "%");
+
+            h.itemView.setOnClickListener(v -> {
+                if (listener != null) listener.onTaskClick(t);
+            });
+            h.itemView.setOnLongClickListener(v -> {
+                if (listener != null) listener.onTaskLongClick(t);
+                return true;
+            });
         }
     }
 

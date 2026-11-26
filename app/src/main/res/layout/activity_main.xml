@@ -64,6 +64,7 @@
                 android:id="@+id/btn_lang"
                 android:layout_width="40dp"
                 android:layout_height="42dp"
+                android:layout_marginStart="6dp"
                 android:gravity="center"
                 android:text="EN"
                 android:textColor="?attr/nxText"
@@ -176,56 +177,63 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
 
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/list"
+                <FrameLayout
                     android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:clipToPadding="false"
-                    android:paddingBottom="18dp"
-                    android:scrollbars="none" />
+                    android:layout_height="match_parent">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/list"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:clipToPadding="false"
+                        android:paddingBottom="18dp"
+                        android:scrollbars="none" />
+
+                    <LinearLayout
+                        android:id="@+id/empty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top"
+                        android:layout_marginTop="4dp"
+                        android:orientation="vertical"
+                        android:padding="20dp"
+                        android:background="@drawable/nx_card"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/empty_title"
+                            android:textColor="?attr/nxText"
+                            android:textSize="17sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:lineSpacingExtra="3dp"
+                            android:text="@string/empty_body"
+                            android:textColor="?attr/nxTextDim"
+                            android:textSize="13.5sp" />
+
+                        <TextView
+                            android:id="@+id/empty_btn"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:paddingStart="16dp"
+                            android:paddingTop="9dp"
+                            android:paddingEnd="16dp"
+                            android:paddingBottom="9dp"
+                            android:background="@drawable/nx_pill_on"
+                            android:text="@string/connect"
+                            android:textColor="?attr/nxOnPrimary"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </FrameLayout>
             </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
-
-            <LinearLayout
-                android:id="@+id/empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp"
-                android:background="@drawable/nx_card"
-                android:visibility="gone">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/empty_title"
-                    android:textColor="?attr/nxText"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:lineSpacingExtra="3dp"
-                    android:text="@string/empty_body"
-                    android:textColor="?attr/nxTextDim"
-                    android:textSize="13.5sp" />
-
-                <TextView
-                    android:id="@+id/empty_btn"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:paddingStart="16dp"
-                    android:paddingTop="9dp"
-                    android:paddingEnd="16dp"
-                    android:paddingBottom="9dp"
-                    android:background="@drawable/nx_pill_on"
-                    android:text="@string/connect"
-                    android:textColor="?attr/nxOnPrimary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
 
             <androidx.core.widget.NestedScrollView
                 android:id="@+id/train_scroll"
@@ -395,14 +403,17 @@
                     </LinearLayout>
 
                     <LinearLayout
+                        android:id="@+id/tr_log_card"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
                         android:orientation="vertical"
                         android:padding="16dp"
-                        android:background="@drawable/nx_card">
+                        android:background="@drawable/nx_card"
+                        android:visibility="gone">
 
                         <TextView style="@style/NxMetricLabel" android:text="@string/train_log" />
+
                         <TextView
                             android:id="@+id/tr_tail"
                             android:layout_width="match_parent"

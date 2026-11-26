@@ -64,10 +64,14 @@
     display:grid;place-items:center;font-style:normal;font-size:10px;color:var(--faint);margin-top:1px}
   .step.on i{border-color:var(--accent);color:var(--accent-soft);background:#8B5CF620}
   .step.on{color:var(--text)}
+  .step b{color:#8f88a8;font-weight:500}
   .feed{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:#9c95b4;
     white-space:pre-wrap;line-height:1.7;max-height:150px;overflow:auto}
   footer{margin-top:22px;color:var(--faint);font-size:12px;display:flex;gap:16px;flex-wrap:wrap}
-  .err{border:1px solid #5b2734;background:#1d1119;color:#f0a3ad;padding:14px 16px;border-radius:12px;font-size:13px}
+  .err{border:1px solid #5b2734;background:#1d1119;color:#f0a3ad;padding:14px 16px;border-radius:12px;
+    font-size:13px;margin-bottom:16px}
+  .btn{border:1px solid var(--border);background:#0F0C1A;color:var(--dim);border-radius:10px;
+    padding:6px 11px;font:inherit;font-size:12.5px;cursor:pointer}
   a{color:var(--accent-soft)}
 </style>
 </head>
@@ -76,12 +80,15 @@
   <header>
     <div class="mark">N</div>
     <div>
-      <h1>Обучение Ada</h1>
-      <div class="sub">источник: <code style="color:#8f88a8">D:\finetune\runs\logs\marathon.log</code></div>
+      <h1 data-i18n="title">Обучение Ada</h1>
+      <div class="sub" data-i18n="subtitle">прогресс прогона · читается сервером</div>
     </div>
     <div class="spacer"></div>
     <div class="pill"><span class="dot" id="dot"></span><span id="state">—</span></div>
+    <button class="btn" id="langBtn">EN</button>
   </header>
+
+  <div id="err" class="err" hidden></div>
 
   <div class="grid">
     <section class="card">
@@ -95,33 +102,33 @@
         <div class="val">
           <div>
             <div class="big" id="pct">—</div>
-            <div class="small" id="run">запуск не найден</div>
+            <div class="small" id="run">—</div>
           </div>
         </div>
       </div>
       <div class="kv">
-        <div><div class="k">шаг</div><div class="v mono" id="step">—</div></div>
-        <div><div class="k">осталось (при текущем темпе)</div><div class="v mono" id="eta">—</div></div>
-        <div><div class="k">прошло</div><div class="v mono" id="elapsed">—</div></div>
-        <div><div class="k">eval loss</div><div class="v mono" id="loss">—</div></div>
+        <div><div class="k" data-i18n="stepLabel">шаг</div><div class="v mono" id="step">—</div></div>
+        <div><div class="k" data-i18n="etaLabel">осталось (при текущем темпе)</div><div class="v mono" id="eta">—</div></div>
+        <div><div class="k" data-i18n="elapsedLabel">прошло</div><div class="v mono" id="elapsed">—</div></div>
+        <div><div class="k" id="lossLabel" data-i18n="lossLabel">eval loss</div><div class="v mono" id="loss">—</div></div>
       </div>
     </section>
 
     <section class="card">
-      <h2>Loss по эпохе</h2>
+      <h2 data-i18n="chartTitle">Loss по эпохе</h2>
       <canvas class="chart" id="chart" width="760" height="180"></canvas>
-      <h2 style="margin-top:18px">Цепочка</h2>
+      <h2 style="margin-top:18px" data-i18n="chainTitle">Цепочка</h2>
       <div class="steps" id="steps"></div>
-      <h2 style="margin-top:18px">Журнал цепочки</h2>
+      <h2 style="margin-top:18px" data-i18n="feedTitle">Журнал цепочки</h2>
       <div class="feed" id="feed">—</div>
     </section>
   </div>
 
   <footer>
-    <span>бюджет прогона — 8 ч, дальше чекпойнт и стоп по времени</span>
-    <span>обновлено <b id="upd" style="color:#c9c3dd">—</b></span>
-    <span>опрос каждые 5 с</span>
-    <span><a id="board" href="/">← к доске задач</a></span>
+    <span data-i18n="budgetNote">бюджет прогона — 8 ч, дальше чекпойнт и стоп по времени</span>
+    <span><span data-i18n="updated">обновлено</span> <b id="upd" style="color:#c9c3dd">—</b></span>
+    <span data-i18n="pollNote">опрос каждые 5 с</span>
+    <span><a id="board" href="/" data-i18n="boardLink">← к доске задач</a></span>
   </footer>
 </div>
 <script>
@@ -129,13 +136,116 @@ const CIRC = 2 * Math.PI * 94;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+// адрес доски подставляет сервер (cookie HttpOnly, ключ из JS не читается)
+const BOARD_URL = "__NEXUS_BOARD_URL__";
+
+const DICT = {
+  ru: {
+    docTitle: "Nexus · Обучение",
+    title: "Обучение Ada",
+    subtitle: "прогресс прогона · читается сервером",
+    stepLabel: "шаг",
+    etaLabel: "осталось (при текущем темпе)",
+    elapsedLabel: "прошло",
+    lossLabel: "eval loss",
+    lossTrainLabel: "loss (train)",
+    chartTitle: "Loss по эпохе",
+    chainTitle: "Цепочка",
+    feedTitle: "Журнал цепочки",
+    budgetNote: "бюджет прогона — 8 ч, дальше чекпойнт и стоп по времени",
+    updated: "обновлено",
+    pollNote: "опрос каждые 5 с",
+    boardLink: "← к доске задач",
+    langBtn: "EN",
+    noRun: "запуск не найден",
+    noLogs: "данных обучения нет",
+    noChain: "журнал цепочки пуст",
+    stageToken: "токенизация данных",
+    stageTrain: "обучение",
+    stageStart: "запуск",
+    stageBuild: "сборка данных",
+    paused: "обучение на паузе · лог молчит",
+    silent: "логи молчат",
+    noServer: "нет связи с сервером",
+    sec: "с",
+    etaBudget: "по бюджету 08:00 (полный проход {h} ч)",
+    pausedEta: "на паузе · остаток {t}",
+    chartEmpty: "данных пока нет",
+    chartOne: "одна точка: {v} — ждём следующий eval",
+    errNoData: "Нет данных обучения: ",
+  },
+  en: {
+    docTitle: "Nexus · Training",
+    title: "Ada training",
+    subtitle: "run progress · served by the server",
+    stepLabel: "step",
+    etaLabel: "left (at current rate)",
+    elapsedLabel: "elapsed",
+    lossLabel: "eval loss",
+    lossTrainLabel: "loss (train)",
+    chartTitle: "Loss per epoch",
+    chainTitle: "Chain",
+    feedTitle: "Chain log",
+    budgetNote: "run budget — 8 h, then checkpoint and stop on time",
+    updated: "updated",
+    pollNote: "polled every 5 s",
+    boardLink: "← back to the task board",
+    langBtn: "RU",
+    noRun: "run not found",
+    noLogs: "no training data",
+    noChain: "chain log is empty",
+    stageToken: "tokenizing data",
+    stageTrain: "training",
+    stageStart: "starting",
+    stageBuild: "building dataset",
+    paused: "training paused · log silent for",
+    silent: "log silent for",
+    noServer: "no connection to the server",
+    sec: "s",
+    etaBudget: "budget 08:00 (full pass {h} h)",
+    pausedEta: "paused · left {t}",
+    chartEmpty: "no data yet",
+    chartOne: "single point: {v} — waiting for next eval",
+    errNoData: "No training data: ",
+  },
+};
+
+const LANG_KEY = "nt-lang";
+function lang(){
+  const fromUrl = new URLSearchParams(location.search).get("lang");
+  if (fromUrl === "ru" || fromUrl === "en") return fromUrl;
+  const saved = localStorage.getItem(LANG_KEY);
+  if (saved === "ru" || saved === "en") return saved;
+  return String(navigator.language || "").toLowerCase().startsWith("ru") ? "ru" : "en";
+}
+function t(key, vars){
+  const dict = DICT[lang()] || DICT.ru;
+  let s = dict[key] != null ? dict[key] : key;
+  if (vars) for (const k of Object.keys(vars)) s = s.split("{" + k + "}").join(vars[k]);
+  return s;
+}
+function boardHref(){
+  const injected = String(BOARD_URL || "");
+  if (injected && injected.indexOf("__NEXUS_BOARD_URL__") === -1) return injected;
+  // страница открыта статикой: остаётся ключ из адреса или вход через ворота
+  const own = new URLSearchParams(location.search).get("k") || "";
+  return own ? "/?k=" + encodeURIComponent(own) : "/";
+}
+function applyStatic(){
+  document.documentElement.lang = lang();
+  document.title = t("docTitle");
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  $("langBtn").textContent = t("langBtn");
+  $("board").href = boardHref();
+}
+
 function drawChart(values){
   const c = $("chart"), ctx = c.getContext("2d");
   const w = c.width, h = c.height, pad = 14;
   ctx.clearRect(0,0,w,h);
   if (!values || values.length < 2){
     ctx.fillStyle = "#6B6482"; ctx.font = "13px Segoe UI, sans-serif";
-    ctx.fillText(values && values.length ? "одна точка: " + values[0].toFixed(4) + " — ждём следующий eval" : "данных пока нет", pad, h/2);
+    ctx.fillText(values && values.length ? t("chartOne", {v: values[0].toFixed(4)}) : t("chartEmpty"), pad, h/2);
     return;
   }
   const min = Math.min(...values), max = Math.max(...values);
@@ -160,56 +270,112 @@ function drawChart(values){
   ctx.fillText(min.toFixed(4), pad, h - 2);
 }
 
+// «Цепочка» рисуется из chainLines: последняя строка — текущий этап
+function renderChain(lines){
+  const box = $("steps");
+  const list = Array.isArray(lines) ? lines.filter(Boolean) : [];
+  if (!list.length){
+    box.innerHTML = `<div class="step"><i>·</i><span>${esc(t("noChain"))}</span></div>`;
+    return;
+  }
+  box.innerHTML = list.map((raw, i) => {
+    const line = String(raw);
+    const m = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+    const when = m ? m[1] : "";
+    const text = m ? m[2] : line;
+    const on = i === list.length - 1 ? " on" : "";
+    return `<div class="step${on}"><i>${i + 1}</i><span>${when ? `<b>${esc(when)}</b> ` : ""}${esc(text)}</span></div>`;
+  }).join("");
+}
+
+let lastData = null;
+
 function render(d){
-  if (!d.ok){ document.body.insertAdjacentHTML("afterbegin", '<div class="wrap"><div class="err">Нет данных обучения: ' + esc(d.error||"") + '</div></div>'); return; }
+  lastData = d;
+  if (!d || d.ok === false){
+    const box = $("err");
+    box.textContent = t("errNoData") + ((d && d.error) || "—");
+    box.hidden = false;
+    $("pct").textContent = "—";
+    $("run").textContent = t("noRun");
+    $("step").textContent = "—";
+    $("eta").textContent = "—";
+    $("elapsed").textContent = "—";
+    $("loss").textContent = "—";
+    $("state").textContent = t("noLogs");
+    $("dot").className = "dot stop";
+    $("feed").textContent = t("noChain");
+    renderChain([]);
+    drawChart([]);
+    return;
+  }
+  $("err").hidden = true;
+
   const pct = d.pct == null ? 0 : d.pct;
   $("pct").textContent = d.pct == null ? "—" : d.pct.toFixed(1) + "%";
   $("arc").setAttribute("stroke-dashoffset", String(CIRC * (1 - Math.max(0, Math.min(1, pct/100)))));
   $("arc").setAttribute("stroke", d.alive ? "#A78BFA" : "#F87171");
-  $("run").textContent = d.run ? d.run : "запуск не найден";
-  $("step").textContent = d.step ? d.step + " / " + d.total + (d.unit ? " " + d.unit : "") : "—";
+  $("run").textContent = d.run ? d.run : t("noRun");
+  $("step").textContent = d.step != null ? d.step + " / " + d.total + (d.unit ? " " + d.unit : "") : "—";
+
   const budget = 8 * 3600;
-  const paused = !d.alive && d.step;
+  const paused = !d.alive && d.step != null;
   let etaText = d.remain || "—";
   if (d.remainSeconds && d.remainSeconds > budget) {
-    etaText = "по бюджету 08:00 (полный проход " + Math.round(d.remainSeconds / 3600) + " ч)";
+    etaText = t("etaBudget", { h: Math.round(d.remainSeconds / 3600) });
   }
-  if (paused) etaText = "на паузе · остаток " + etaText;
+  if (paused) etaText = t("pausedEta", { t: etaText });
   $("eta").textContent = etaText;
   $("elapsed").textContent = d.elapsed || "—";
-  $("loss").textContent = d.loss == null ? "—" : d.loss.toFixed(4);
+  $("lossLabel").textContent = d.lossKind === "train" ? t("lossTrainLabel") : t("lossLabel");
+  $("loss").textContent = d.loss == null ? "—" : Number(d.loss).toFixed(4);
+
   $("dot").className = "dot" + (d.alive ? "" : " stop");
-  const stageLabel = d.stage === "tokenization" ? "токенизация данных"
-    : d.stage === "training" ? "обучение"
-    : d.stage === "start" ? "запуск" : "сборка данных";
-  const age = d.logAge == null ? null : d.logAge;
+  const stageLabel = d.stage === "tokenization" ? t("stageToken")
+    : d.stage === "training" ? t("stageTrain")
+    : d.stage === "start" ? t("stageStart") : t("stageBuild");
+  const age = d.logAge == null ? "?" : d.logAge;
   $("state").textContent = d.alive ? stageLabel
-    : (d.step ? "обучение на паузе · лог молчит " + (age == null ? "?" : age) + " с"
-              : "логи молчат " + (age == null ? "?" : age) + " с");
-  const phase = (d.phase || "").toLowerCase();
-  const runName = (d.run || "").toLowerCase();
-  const steps = [
-    {t:"Шаг 1 · ada-v5 на curated_v5", on: runName.includes("ada-v5")},
-    {t:"Шаг 2 · сборка curated_v6 (enwiki 200k, ruwiki 120k, ruwikibooks)", on: phase.includes("v6") || phase.includes("curated")},
-    {t:"Шаг 3 · ada-v6 на curated_v6", on: runName.includes("ada-v6")}
-  ];
-  $("feed").textContent = (d.chainLines||[]).join("\n") || "журнал пуст";
+    : (d.step != null ? t("paused") + " " + age + " " + t("sec")
+                      : t("silent") + " " + age + " " + t("sec"));
+
+  renderChain(d.chainLines || []);
+  $("feed").textContent = (d.chainLines || []).join("\n") || t("noChain");
   drawChart(d.losses || []);
 }
 
 async function tick(){
   try{
     const r = await fetch("/api/train", {cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
     const d = await r.json();
     render(d);
-    $("upd").textContent = new Date().toLocaleTimeString("ru-RU");
+    $("upd").textContent = new Date().toLocaleTimeString(lang() === "ru" ? "ru-RU" : "en-GB");
   }catch(e){
     $("dot").className = "dot stop";
-    $("state").textContent = "нет связи с сервером";
+    $("state").textContent = t("noServer");
   }
 }
-tick();
-setInterval(tick, 5000);
+
+// один запрос за раз: следующая попытка только после завершения прошлой
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async function pump(){
+  for (;;){
+    if (!document.hidden) await tick();
+    await sleep(5000);
+  }
+})();
+
+applyStatic();
+$("langBtn").onclick = () => {
+  const next = lang() === "ru" ? "en" : "ru";
+  localStorage.setItem(LANG_KEY, next);
+  const url = new URL(location.href);
+  url.searchParams.set("lang", next);
+  history.replaceState(null, "", url);
+  applyStatic();
+  if (lastData) render(lastData);
+};
 </script>
 </body>
 </html>

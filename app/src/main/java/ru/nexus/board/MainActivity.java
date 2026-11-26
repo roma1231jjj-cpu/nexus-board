@@ -1,13 +1,18 @@
 package ru.nexus.board;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -16,6 +21,7 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -31,7 +37,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -39,20 +44,26 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements BoardAdapter.Listener {
 
-    private Prefs prefs;
-    private final ExecutorService pool = Executors.newFixedThreadPool(3);
     private static final long REFRESH_MS = 10000L;
     private static final long REFRESH_SLOW_MS = 30000L;
     private static final long VIEWS_MS = 5000L;
     private static final int TAB_BOARD = 0;
     private static final int TAB_TRAIN = 1;
     private static final int TAB_VIEWS = 2;
+
+    private static final String[] STATUS_IDS = {"doing", "todo", "blocked", "done"};
+    private static final String[] MODE_IDS = {"auto", "task", "night"};
+
+    private Prefs prefs;
+    private final ExecutorService pool = Executors.newFixedThreadPool(3);
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final AtomicBoolean boardRequest = new AtomicBoolean(false);
     private volatile boolean loading = false;
     private volatile boolean lastFailed = false;
-    private final Handler ui = new Handler(Looper.getMainLooper());
 
     private BoardAdapter adapter;
     private RecyclerView list;
@@ -62,13 +73,15 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout viewsBox;
     private LinearLayout chips;
     private HorizontalScrollView chipsWrap;
-    private List<String[]> sections = new ArrayList<>();
+    private final List<String[]> sections = new ArrayList<>();
     private String activeSection = "";
     private JSONObject lastTasks;
     private TextView status, tabBoard, tabTrain, tabViews;
     private TextView trState, trRun, trStage, trStep, trLoss, trEta, trRate, trSteps, trChain, trTail;
+    private View trLogCard;
     private ProgressBar trBar;
     private SparkView trSpark;
+    private AlertDialog openDialog;
 
     private int tab = TAB_BOARD;
     private volatile boolean viewsLoading = false;
@@ -76,8 +89,16 @@ public class MainActivity extends AppCompatActivity {
     private String viewsVersion = "";
     private String viewsSig = "";
     private int viewsCount = -1;
-    private String pendingUpdate = null;
+
+    private String pendingUpdate = "";
+    private String pendingName = "";
     private String pendingNotes = "";
+    private String pendingSha = "";
+    private File pendingApk;
+
+    private interface Pick {
+        void on(int index);
+    }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -87,6 +108,11 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         NxBackdrop.apply(findViewById(R.id.root));
+
+        pendingUpdate = prefs.updFile();
+        pendingName = prefs.updName();
+        pendingNotes = prefs.updNotes();
+        pendingSha = prefs.updSha();
 
         status = findViewById(R.id.status);
         tabBoard = findViewById(R.id.tab_board);
@@ -99,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
         trainScroll = findViewById(R.id.train_scroll);
         chips = findViewById(R.id.chips);
         chipsWrap = findViewById(R.id.chips_wrap);
+        trLogCard = findViewById(R.id.tr_log_card);
 
         trState = findViewById(R.id.tr_state);
         trRun = findViewById(R.id.tr_run);
@@ -114,8 +141,13 @@ public class MainActivity extends AppCompatActivity {
         trSpark = findViewById(R.id.tr_spark);
 
         adapter = new BoardAdapter();
+        adapter.setListener(this);
         list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(adapter);
+        list.setOnLongClickListener(v -> {
+            openTaskDialog(null);
+            return true;
+        });
 
         int accent = NxBackdrop.color(this, R.attr.nxPrimary);
         swipe.setColorSchemeColors(accent);
@@ -131,7 +163,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_lang).setOnClickListener(v -> switchLang());
         findViewById(R.id.btn_key).setOnClickListener(v -> openConnect());
         findViewById(R.id.btn_update).setOnClickListener(v -> {
-            if (pendingUpdate != null) downloadUpdate();
+            if (!pendingUpdate.isEmpty()) downloadUpdate();
             else checkUpdates(true);
         });
 
@@ -151,7 +183,16 @@ public class MainActivity extends AppCompatActivity {
         selectTab(start);
         findViewById(R.id.empty_btn).setOnClickListener(v -> openConnect());
 
-        status.setOnClickListener(v -> openConnect());
+        View empty = findViewById(R.id.empty);
+        empty.setOnLongClickListener(v -> {
+            openTaskDialog(null);
+            return true;
+        });
+
+        status.setOnClickListener(v -> {
+            if (!pendingUpdate.isEmpty()) openUpdateDialog();
+            else openConnect();
+        });
         status.setOnLongClickListener(v -> {
             openConnect();
             return true;
@@ -162,6 +203,7 @@ public class MainActivity extends AppCompatActivity {
             return true;
         });
 
+        if (!pendingUpdate.isEmpty()) showUpdateStatus();
         load();
     }
 
@@ -178,6 +220,41 @@ public class MainActivity extends AppCompatActivity {
         Configuration cfg = new Configuration(base.getResources().getConfiguration());
         cfg.setLocale(new Locale(tag));
         super.attachBaseContext(base.createConfigurationContext(cfg));
+    }
+
+    private boolean alive() {
+        return !isFinishing() && !isDestroyed();
+    }
+
+    private void uiPost(Runnable r) {
+        ui.post(() -> {
+            if (!alive()) return;
+            r.run();
+        });
+    }
+
+    private int dp(float v) {
+        return (int) (v * getResources().getDisplayMetrics().density);
+    }
+
+    private void toast(int res) {
+        if (alive()) Toast.makeText(this, res, Toast.LENGTH_SHORT).show();
+    }
+
+    private void toast(String text) {
+        if (alive()) Toast.makeText(this, text, Toast.LENGTH_SHORT).show();
+    }
+
+    private void reportFailure(int code) {
+        if (code == 401 || code == 403) {
+            askKey();
+        } else if (code == -1) {
+            toast(R.string.net_error);
+        } else if (code == 404) {
+            toast(R.string.delete_unsupported);
+        } else {
+            toast(getString(R.string.server_reply, String.valueOf(code)));
+        }
     }
 
     private void nextTheme() {
@@ -204,6 +281,12 @@ public class MainActivity extends AppCompatActivity {
         pill(tabBoard, next == TAB_BOARD, onText, dim);
         pill(tabTrain, next == TAB_TRAIN, onText, dim);
         pill(tabViews, next == TAB_VIEWS, onText, dim);
+        if (next == TAB_BOARD) {
+            renderTasks(lastTasks);
+        } else {
+            View empty = findViewById(R.id.empty);
+            if (empty != null) empty.setVisibility(View.GONE);
+        }
         if (next == TAB_VIEWS) {
             loadViews(true);
             ui.removeCallbacks(viewsTick);
@@ -229,6 +312,7 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable viewsTick = new Runnable() {
         @Override
         public void run() {
+            if (!alive()) return;
             if (tab == TAB_VIEWS) loadViews(false);
             ui.postDelayed(this, VIEWS_MS);
         }
@@ -255,7 +339,7 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             final JSONObject fo = o;
-            ui.post(() -> {
+            uiPost(() -> {
                 viewsLoading = false;
                 viewsSwipe.setRefreshing(false);
                 if (fo != null) renderViews(fo);
@@ -267,7 +351,7 @@ public class MainActivity extends AppCompatActivity {
     private View hintCard(int titleRes, int bodyRes) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        int p = (int) (16 * getResources().getDisplayMetrics().density);
+        int p = dp(16);
         card.setPadding(p, p, p, p);
         card.setBackgroundResource(R.drawable.nx_card);
 
@@ -281,11 +365,11 @@ public class MainActivity extends AppCompatActivity {
         TextView body = new TextView(this);
         body.setText(bodyRes);
         body.setTextSize(13f);
-        body.setLineSpacing((int) (3 * getResources().getDisplayMetrics().density), 1f);
+        body.setLineSpacing(dp(3), 1f);
         body.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = (int) (8 * getResources().getDisplayMetrics().density);
+        lp.topMargin = dp(8);
         card.addView(body, lp);
         return card;
     }
@@ -352,13 +436,14 @@ public class MainActivity extends AppCompatActivity {
     private void load() {
         final String key = prefs.key();
         final String base = prefs.base();
-        if (!prefs.nexusMode() && prefs.boardId().isEmpty()) registerBoard();
-        final String board = prefs.boardId();
-        if (loading) return;
-        if (board.isEmpty() && key.isEmpty()) {
+        final boolean nexus = !key.isEmpty();
+        if (!nexus && !Prefs.validBoardId(prefs.boardId())) {
             status.setText(R.string.connecting);
+            ensureBoardAsync();
             return;
         }
+        if (loading) return;
+        final String board = prefs.boardId();
         loading = true;
         status.setText(R.string.loading);
         swipe.setRefreshing(true);
@@ -367,20 +452,10 @@ public class MainActivity extends AppCompatActivity {
             JSONObject train = null;
             String error = null;
             boolean auth = false;
-            final boolean nexus = !key.isEmpty();
             try {
                 tasks = nexus
                         ? Api.json(base, "/api/tasks", key)
                         : Api.json(base, "/api/b/tasks?b=" + board, "");
-                if (!nexus && tasks != null) {
-                    JSONArray ta = tasks.optJSONArray("tasks");
-                    if (ta == null || ta.length() == 0) {
-                        try {
-                            Api.postJson(base + "/api/b/seed?b=" + board, "", "{}");
-                            tasks = Api.json(base, "/api/b/tasks?b=" + board, "");
-                        } catch (Exception ignored) { }
-                    }
-                }
             } catch (Api.AuthException e) {
                 auth = true;
             } catch (Exception e) {
@@ -398,7 +473,7 @@ public class MainActivity extends AppCompatActivity {
             final JSONObject fTasks = tasks, fTrain = train;
             final String fError = error;
             final boolean fAuth = auth;
-            ui.post(() -> {
+            uiPost(() -> {
                 loading = false;
                 lastFailed = fError != null && fTasks == null && fTrain == null;
                 swipe.setRefreshing(false);
@@ -430,9 +505,31 @@ public class MainActivity extends AppCompatActivity {
                 if (fTrain != null) renderTrain(fTrain);
                 status.setTypeface(Typeface.DEFAULT);
                 status.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
-                status.setOnClickListener(v -> openConnect());
-                status.setText(getString(R.string.updated, now()));
+                status.setOnClickListener(v -> {
+                    if (!pendingUpdate.isEmpty()) openUpdateDialog();
+                    else openConnect();
+                });
+                if (pendingUpdate.isEmpty()) status.setText(getString(R.string.updated, now()));
+                else showUpdateStatus();
                 checkUpdates();
+            });
+        });
+    }
+
+    private void ensureBoardAsync() {
+        if (!boardRequest.compareAndSet(false, true)) return;
+        pool.execute(() -> {
+            final String id = Prefs.ensureBoard(MainActivity.this);
+            boardRequest.set(false);
+            uiPost(() -> {
+                if (!id.isEmpty()) {
+                    load();
+                    return;
+                }
+                status.setText(R.string.net_error_tap);
+                status.setTextColor(warningColor());
+                status.setTypeface(Typeface.DEFAULT_BOLD);
+                status.setOnClickListener(v -> load());
             });
         });
     }
@@ -445,52 +542,111 @@ public class MainActivity extends AppCompatActivity {
         return new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date());
     }
 
-    private void openConnect() {
-        final float d = getResources().getDisplayMetrics().density;
-        final android.widget.EditText input = new android.widget.EditText(this);
-        input.setText(prefs.boardId());
-        input.setSingleLine(true);
-        input.setHint("0123456789abcdef");
-        input.setTextSize(16f);
+    // ---------- ключ доски ----------
 
-        android.widget.LinearLayout box = new android.widget.LinearLayout(this);
-        box.setOrientation(android.widget.LinearLayout.VERTICAL);
-        box.setPadding((int) (20 * d), (int) (4 * d), (int) (20 * d), 0);
+    private EditText makeInput(String value, String hint, boolean multiline) {
+        EditText e = new EditText(this);
+        e.setTextSize(15f);
+        e.setTextColor(NxBackdrop.color(this, R.attr.nxText));
+        e.setHintTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        e.setBackgroundResource(R.drawable.nx_editor);
+        int p = dp(10);
+        e.setPadding(p, p, p, p);
+        if (multiline) {
+            e.setSingleLine(false);
+            e.setInputType(InputType.TYPE_CLASS_TEXT
+                    | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                    | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+            e.setGravity(Gravity.TOP | Gravity.START);
+            e.setMinLines(3);
+            e.setMaxLines(9);
+        } else {
+            e.setSingleLine(true);
+            e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        }
+        e.setHint(hint);
+        e.setText(value);
+        return e;
+    }
+
+    private TextView smallLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(10.5f);
+        tv.setLetterSpacing(0.14f);
+        tv.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        return tv;
+    }
+
+    private LinearLayout fieldBox(LinearLayout box, int labelRes, View input) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(12);
+        box.addView(smallLabel(getString(labelRes)), lp);
+        box.addView(input);
+        return box;
+    }
+
+    private void openConnect() {
+        final EditText input = makeInput(prefs.boardId(), "0123456789abcdef", false);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(4), dp(20), 0);
         box.addView(input);
 
-        android.widget.Button paste = new android.widget.Button(this);
-        paste.setText(R.string.paste_key);
-        paste.setAllCaps(false);
+        TextView paste = new TextView(this);
+        paste.setText(getString(R.string.paste_key));
+        paste.setTextSize(13f);
+        paste.setGravity(Gravity.CENTER);
+        paste.setPadding(dp(14), dp(10), dp(14), dp(10));
+        paste.setBackgroundResource(R.drawable.nx_chip);
+        paste.setTextColor(NxBackdrop.color(this, R.attr.nxText));
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        plp.topMargin = dp(10);
+        box.addView(paste, plp);
         paste.setOnClickListener(v -> {
-            android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null || cm.getPrimaryClip().getItemCount() == 0) {
-                Toast.makeText(this, R.string.key_empty_clip, Toast.LENGTH_SHORT).show();
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip() == null
+                    || cm.getPrimaryClip().getItemCount() == 0) {
+                toast(R.string.key_empty_clip);
                 return;
             }
             CharSequence raw = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
             input.setText(cleanKey(String.valueOf(raw)));
-            input.setSelection(input.getText().length());
+            if (input.getText().length() > 0) input.setSelection(input.getText().length());
         });
-        box.addView(paste);
 
-        new AlertDialog.Builder(this)
+        AlertDialog dlg = new AlertDialog.Builder(this)
                 .setTitle(R.string.connect_title)
                 .setMessage(R.string.connect_hint)
                 .setView(box)
-                .setPositiveButton(R.string.apply_key, (dd, w) -> applyKey(input.getText().toString()))
-                .setNeutralButton(R.string.copy_key, (dd, w) -> {
-                    String key = prefs.boardId();
-                    if (key.isEmpty()) return;
-                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Nexus Board key", key));
-                    Toast.makeText(this, R.string.key_copied, Toast.LENGTH_SHORT).show();
-                })
+                .setPositiveButton(R.string.apply_key, null)
+                .setNeutralButton(R.string.copy_key, null)
                 .setNegativeButton(R.string.close, null)
-                .show();
+                .create();
+        dlg.setOnShowListener(x -> {
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                if (applyKey(input.getText().toString())) dlg.dismiss();
+            });
+            dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                String key = cleanKey(input.getText().toString());
+                if (key.isEmpty()) {
+                    toast(R.string.copy_empty);
+                    return;
+                }
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm == null) return;
+                cm.setPrimaryClip(ClipData.newPlainText("Nexus Board key", key));
+                toast(R.string.key_copied);
+            });
+        });
+        showSafe(dlg);
     }
 
     private static String cleanKey(String raw) {
-        String v = raw == null ? "" : raw.trim().toLowerCase();
+        String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         int at = v.indexOf("k=");
         if (at >= 0) v = v.substring(at + 2);
         StringBuilder sb = new StringBuilder();
@@ -501,41 +657,683 @@ public class MainActivity extends AppCompatActivity {
         return sb.toString();
     }
 
-    private void applyKey(String raw) {
+    private boolean applyKey(String raw) {
         String key = cleanKey(raw);
+        if (key.isEmpty()) {
+            newBoard();
+            return true;
+        }
         if (key.length() != 16) {
-            Toast.makeText(this, R.string.key_bad, Toast.LENGTH_LONG).show();
-            return;
+            toast(R.string.key_bad);
+            return false;
         }
         prefs.boardId(key);
+        resetBoardState();
+        toast(R.string.key_ok);
+        load();
+        return true;
+    }
+
+    private void newBoard() {
+        prefs.clearBoard();
+        resetBoardState();
+        toast(R.string.board_new);
+        ensureBoardAsync();
+    }
+
+    private void resetBoardState() {
         lastTasks = null;
         sections.clear();
         activeSection = "";
+        viewsReady = false;
+        viewsVersion = "";
+        viewsSig = "";
+        viewsCount = -1;
         if (adapter != null) adapter.setItems(new ArrayList<>());
-        Toast.makeText(this, R.string.key_ok, Toast.LENGTH_SHORT).show();
-        load();
+        renderChips();
+        updateTabs();
     }
 
-    private void registerBoard() {
-        final String base = prefs.base();
-        pool.execute(() -> {
-            try {
-                JSONObject o = Api.postJson(base + "/api/b/new", "", "{}");
-                final String id = o.optString("id", "");
-                if (!id.isEmpty()) {
-                    prefs.boardId(id);
-                    ui.post(this::load);
+    private void openSettings() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+
+        final EditText url = makeInput(prefs.base(), "https://board.nexus-your-heper.ru", false);
+        final EditText key = makeInput(prefs.key(), getString(R.string.f_key_hint), false);
+        final EditText board = makeInput(prefs.boardId(), getString(R.string.f_board_hint), false);
+        fieldBox(box, R.string.f_server, url);
+        fieldBox(box, R.string.f_key, key);
+        fieldBox(box, R.string.f_board, board);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.f_note);
+        hint.setTextSize(12f);
+        hint.setLineSpacing(dp(3), 1f);
+        hint.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        hp.topMargin = dp(14);
+        box.addView(hint, hp);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.key_title)
+                .setView(box)
+                .setPositiveButton(R.string.key_ok, null)
+                .setNegativeButton(R.string.key_cancel, null)
+                .create();
+        dlg.setOnShowListener(x -> dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String bid = board.getText().toString().trim().toLowerCase(Locale.ROOT);
+            if (!bid.isEmpty() && !bid.matches("^[a-f0-9]{16}$")) {
+                toast(R.string.board_bad);
+                return;
+            }
+            String rawKey = key.getText().toString().trim();
+            prefs.base(url.getText().toString().trim());
+            prefs.key(rawKey.matches("(?i)^[a-f0-9]{16}$") ? rawKey.toLowerCase(Locale.ROOT) : rawKey);
+            boolean fresh = bid.isEmpty();
+            if (fresh) prefs.clearBoard();
+            else prefs.boardId(bid);
+            lastTasks = null;
+            sections.clear();
+            activeSection = "";
+            dlg.dismiss();
+            if (fresh) toast(R.string.board_new);
+            recreate();
+        }));
+        showSafe(dlg);
+    }
+
+    private void showSafe(AlertDialog d) {
+        if (!alive()) return;
+        openDialog = d;
+        d.show();
+    }
+
+    private boolean keyDialogShown = false;
+
+    private void askKey() {
+        if (keyDialogShown || !alive()) return;
+        keyDialogShown = true;
+        final EditText input = makeInput(prefs.key(), getString(R.string.key_hint), false);
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(4), dp(20), 0);
+
+        TextView hint = new TextView(this);
+        hint.setText(R.string.key_need);
+        hint.setTextSize(13f);
+        hint.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        box.addView(hint);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(10);
+        box.addView(input, lp);
+
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle(R.string.key_title)
+                .setView(box)
+                .setPositiveButton(R.string.key_ok, null)
+                .setNegativeButton(R.string.key_cancel, null)
+                .create();
+        d.setOnDismissListener(x -> keyDialogShown = false);
+        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String k = input.getText().toString().trim();
+            if (k.isEmpty()) {
+                toast(R.string.key_need);
+                return;
+            }
+            prefs.key(k);
+            d.dismiss();
+            load();
+        }));
+        showSafe(d);
+    }
+
+    // ---------- задачи ----------
+
+    @Override
+    public void onTaskClick(BoardAdapter.Task t) {
+        openTaskFull(t);
+    }
+
+    @Override
+    public void onTaskLongClick(BoardAdapter.Task t) {
+        openTaskDialog(t);
+    }
+
+    private View bounded(View content, float ratio) {
+        FrameLayout holder = new FrameLayout(this);
+        int h = (int) (getResources().getDisplayMetrics().heightPixels * ratio);
+        holder.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, h));
+        return holder;
+    }
+
+    private void openTaskFull(final BoardAdapter.Task t) {
+        if (t == null || !alive()) return;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(6), dp(20), dp(6));
+
+        TextView title = new TextView(this);
+        title.setText(t.title);
+        title.setTextSize(18f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(NxBackdrop.color(this, R.attr.nxText));
+        title.setTextIsSelectable(true);
+        box.addView(title);
+
+        TextView meta = new TextView(this);
+        String mode = t.mode == null || t.mode.isEmpty() ? "task" : t.mode;
+        meta.setText(getString(R.string.task_meta, statusLabel(t.status), mode.toUpperCase(Locale.ROOT), t.progress));
+        meta.setTextSize(11.5f);
+        meta.setTextColor(NxBackdrop.color(this, R.attr.nxPrimary));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        mlp.topMargin = dp(6);
+        box.addView(meta, mlp);
+
+        TextView note = new TextView(this);
+        String text = t.note == null ? "" : t.note.trim();
+        note.setText(text.isEmpty() ? getString(R.string.task_no_note) : text);
+        note.setTextSize(14.5f);
+        note.setLineSpacing(dp(3), 1f);
+        note.setTextIsSelectable(true);
+        note.setTextColor(NxBackdrop.color(this, text.isEmpty() ? R.attr.nxTextDim : R.attr.nxText));
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        nlp.topMargin = dp(12);
+        box.addView(note, nlp);
+
+        NestedScrollView scroller = new NestedScrollView(this);
+        scroller.addView(box);
+
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.task_full_title)
+                .setView(bounded(scroller, 0.62f))
+                .setPositiveButton(R.string.close, null)
+                .setNeutralButton(R.string.edit, (d, w) -> openTaskDialog(t))
+                .create();
+        showSafe(dlg);
+    }
+
+    private String statusLabel(String status) {
+        if ("doing".equals(status)) return getString(R.string.sec_now);
+        if ("blocked".equals(status) || "dropped".equals(status)) return getString(R.string.sec_wait);
+        if ("done".equals(status)) return getString(R.string.sec_done);
+        return getString(R.string.sec_next);
+    }
+
+    private int statusIndex(String status) {
+        for (int i = 0; i < STATUS_IDS.length; i++) {
+            if (STATUS_IDS[i].equals(status)) return i;
+        }
+        return 1;
+    }
+
+    private void stylePick(TextView tv, boolean active) {
+        tv.setBackgroundResource(active ? R.drawable.nx_pill_on : R.drawable.nx_chip);
+        tv.setTextColor(NxBackdrop.color(this, active ? R.attr.nxOnPrimary : R.attr.nxText));
+    }
+
+    private LinearLayout pickRow(LinearLayout box, int labelRes, String[] labels,
+                                 final int[] sel, final Pick cb) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        final TextView[] pills = new TextView[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            TextView tv = new TextView(this);
+            tv.setText(labels[i]);
+            tv.setTextSize(11.5f);
+            tv.setGravity(Gravity.CENTER);
+            tv.setPadding(dp(6), dp(9), dp(6), dp(9));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i > 0) lp.setMarginStart(dp(6));
+            row.addView(tv, lp);
+            pills[i] = tv;
+            tv.setOnClickListener(v -> {
+                sel[0] = idx;
+                for (int j = 0; j < pills.length; j++) stylePick(pills[j], j == sel[0]);
+                if (cb != null) cb.on(idx);
+            });
+        }
+        for (int i = 0; i < pills.length; i++) stylePick(pills[i], i == sel[0]);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(6);
+        box.addView(smallLabel(getString(labelRes)), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(row, lp);
+        return row;
+    }
+
+    private void openTaskDialog(final BoardAdapter.Task task) {
+        if (!alive()) return;
+        final boolean edit = task != null;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(4), dp(20), 0);
+
+        final EditText title = makeInput(edit ? task.title : "", getString(R.string.f_task_title_hint), false);
+        final EditText note = makeInput(edit && task.note != null ? task.note : "",
+                getString(R.string.f_task_note_hint), true);
+        fieldBox(box, R.string.f_task_title, title);
+        fieldBox(box, R.string.f_task_note, note);
+
+        final List<String> secIds = new ArrayList<>();
+        final List<String> secNames = new ArrayList<>();
+        secIds.add("");
+        secNames.add(getString(R.string.no_section));
+        for (String[] s : sections) {
+            secIds.add(s[0]);
+            secNames.add(s[1]);
+        }
+        final int[] secSel = {0};
+        final String current = edit && task.section != null ? task.section : "";
+        for (int i = 1; i < secIds.size(); i++) {
+            if (secIds.get(i).equals(current)) secSel[0] = i;
+        }
+
+        LinearLayout secRow = new LinearLayout(this);
+        secRow.setOrientation(LinearLayout.HORIZONTAL);
+        final TextView secBtn = new TextView(this);
+        secBtn.setTextSize(12.5f);
+        secBtn.setPadding(dp(14), dp(9), dp(14), dp(9));
+        secBtn.setText(secNames.get(secSel[0]));
+        secBtn.setBackgroundResource(R.drawable.nx_chip);
+        secBtn.setTextColor(NxBackdrop.color(this, R.attr.nxText));
+        secBtn.setOnClickListener(v -> {
+            String[] names = secNames.toArray(new String[0]);
+            showSafe(new AlertDialog.Builder(this)
+                    .setTitle(R.string.f_task_section)
+                    .setSingleChoiceItems(names, secSel[0], (dd, w) -> {
+                        secSel[0] = w;
+                        secBtn.setText(secNames.get(w));
+                        dd.dismiss();
+                    })
+                    .setNegativeButton(R.string.key_cancel, null)
+                    .create());
+        });
+        secRow.addView(secBtn);
+        LinearLayout.LayoutParams srp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        srp.topMargin = dp(6);
+        box.addView(smallLabel(getString(R.string.f_task_section)), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(secRow, srp);
+
+        final int[] stSel = {edit ? statusIndex(task.status) : 1};
+        String[] stLabels = {
+                getString(R.string.sec_now),
+                getString(R.string.sec_next),
+                getString(R.string.sec_wait),
+                getString(R.string.sec_done)};
+        pickRow(box, R.string.f_task_status, stLabels, stSel, null);
+
+        final int[] modeSel = {1};
+        if (edit && task.mode != null) {
+            for (int i = 0; i < MODE_IDS.length; i++) {
+                if (MODE_IDS[i].equals(task.mode)) modeSel[0] = i;
+            }
+        }
+        String[] modeLabels = {"AUTO", "TASK", "NIGHT"};
+        pickRow(box, R.string.f_task_mode, modeLabels, modeSel, null);
+
+        final int[] prog = {edit ? Math.max(0, Math.min(100, task.progress)) : 0};
+        final TextView pct = new TextView(this);
+        pct.setTextSize(13f);
+        pct.setTextColor(NxBackdrop.color(this, R.attr.nxPrimary));
+        pct.setTypeface(Typeface.DEFAULT_BOLD);
+        pct.setText(getString(R.string.pct_value, prog[0]));
+        SeekBar bar = new SeekBar(this);
+        bar.setMax(100);
+        bar.setProgress(prog[0]);
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar sb, int value, boolean fromUser) {
+                prog[0] = value;
+                pct.setText(getString(R.string.pct_value, value));
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar sb) {
+            }
+        });
+        LinearLayout progHead = new LinearLayout(this);
+        progHead.setOrientation(LinearLayout.HORIZONTAL);
+        progHead.setGravity(Gravity.CENTER_VERTICAL);
+        progHead.addView(smallLabel(getString(R.string.f_task_progress)),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        progHead.addView(pct);
+        LinearLayout.LayoutParams phlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        phlp.topMargin = dp(14);
+        box.addView(progHead, phlp);
+        box.addView(bar);
+
+        NestedScrollView scroller = new NestedScrollView(this);
+        scroller.addView(box);
+
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle(edit ? R.string.task_edit : R.string.task_new)
+                .setView(bounded(scroller, 0.74f))
+                .setPositiveButton(R.string.save, null)
+                .setNegativeButton(R.string.key_cancel, null);
+        if (edit) b.setNeutralButton(R.string.delete, null);
+        final AlertDialog dlg = b.create();
+        dlg.setOnShowListener(x -> {
+            dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String t = title.getText().toString().trim();
+                if (t.isEmpty()) {
+                    toast(R.string.task_need_title);
+                    return;
                 }
+                JSONObject body = new JSONObject();
+                try {
+                    body.put("title", t);
+                    body.put("note", note.getText().toString());
+                    body.put("status", STATUS_IDS[stSel[0]]);
+                    body.put("mode", MODE_IDS[modeSel[0]]);
+                    body.put("progress", prog[0]);
+                    body.put("section", secIds.get(secSel[0]));
+                    if (edit) body.put("id", task.id);
+                } catch (Exception ignored) {
+                }
+                dlg.dismiss();
+                saveTask(edit, body);
+            });
+            if (edit) {
+                dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                    dlg.dismiss();
+                    deleteTask(task.id);
+                });
+            }
+        });
+        showSafe(dlg);
+    }
+
+    private void saveTask(final boolean edit, final JSONObject body) {
+        final String board = prefs.boardId();
+        final String base = prefs.base();
+        final String key = prefs.key();
+        if (board.isEmpty()) {
+            toast(R.string.need_board);
+            return;
+        }
+        final String path = edit ? "/api/b/update" : "/api/b/add";
+        pool.execute(() -> {
+            int code = -1;
+            try {
+                code = Api.post(base + path + "?b=" + board, key, body.toString()).status;
+            } catch (Api.AuthException e) {
+                code = 401;
             } catch (Exception ignored) {
             }
+            final int f = code;
+            uiPost(() -> {
+                if (f == 200) {
+                    toast(edit ? R.string.task_saved : R.string.task_added);
+                    load();
+                } else if (f == 404) {
+                    toast(R.string.task_gone);
+                    load();
+                } else {
+                    reportFailure(f);
+                }
+            });
+        });
+    }
+
+    private void deleteTask(final String id) {
+        final String board = prefs.boardId();
+        final String base = prefs.base();
+        final String key = prefs.key();
+        if (board.isEmpty() || id == null || id.isEmpty()) return;
+        pool.execute(() -> {
+            int code = -1;
+            try {
+                JSONObject body = new JSONObject();
+                body.put("id", id);
+                code = Api.post(base + "/api/b/delete?b=" + board, key, body.toString()).status;
+            } catch (Api.AuthException e) {
+                code = 401;
+            } catch (Exception ignored) {
+            }
+            final int f = code;
+            uiPost(() -> {
+                if (f == 200) {
+                    toast(R.string.task_deleted);
+                    load();
+                } else if (f == 404) {
+                    toast(R.string.delete_unsupported);
+                } else {
+                    reportFailure(f);
+                }
+            });
+        });
+    }
+
+    // ---------- разделы ----------
+
+    private void openSectionMenu(String sectionId) {
+        final boolean all = sectionId == null || sectionId.isEmpty();
+        final List<String> actions = new ArrayList<>();
+        actions.add(getString(R.string.task_new));
+        if (all) {
+            actions.add(getString(R.string.section_new));
+        } else {
+            actions.add(getString(R.string.section_rename));
+            actions.add(getString(R.string.section_delete));
+        }
+        showSafe(new AlertDialog.Builder(this)
+                .setTitle(all ? R.string.section_actions_all : R.string.section_actions)
+                .setItems(actions.toArray(new String[0]), (dd, w) -> {
+                    if (w == 0) {
+                        openTaskDialog(null);
+                    } else if (all) {
+                        openSectionCreate();
+                    } else if (w == 1) {
+                        openSectionRename(sectionId);
+                    } else {
+                        confirmSectionDelete(sectionId);
+                    }
+                })
+                .setNegativeButton(R.string.key_cancel, null)
+                .create());
+    }
+
+    private void openSectionCreate() {
+        final EditText name = makeInput("", getString(R.string.section_name_hint), false);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(6), dp(20), 0);
+        box.addView(name);
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.section_new)
+                .setView(box)
+                .setPositiveButton(R.string.save, null)
+                .setNegativeButton(R.string.key_cancel, null)
+                .create();
+        dlg.setOnShowListener(x -> dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String n = name.getText().toString().trim();
+            if (n.isEmpty()) {
+                toast(R.string.section_need_name);
+                return;
+            }
+            dlg.dismiss();
+            sectionCreate(n);
+        }));
+        showSafe(dlg);
+    }
+
+    private void sectionCreate(final String name) {
+        final String board = prefs.boardId();
+        final String base = prefs.base();
+        final String key = prefs.key();
+        pool.execute(() -> {
+            int code = -1;
+            try {
+                JSONObject body = new JSONObject();
+                body.put("name", name);
+                code = Api.post(base + "/api/b/section/add?b=" + board, key, body.toString()).status;
+            } catch (Api.AuthException e) {
+                code = 401;
+            } catch (Exception ignored) {
+            }
+            final int f = code;
+            uiPost(() -> {
+                if (f == 200) {
+                    toast(R.string.section_created);
+                    load();
+                } else {
+                    reportFailure(f);
+                }
+            });
+        });
+    }
+
+    private void openSectionRename(final String id) {
+        String current = "";
+        for (String[] s : sections) {
+            if (s[0].equals(id)) current = s[1];
+        }
+        final EditText name = makeInput(current, getString(R.string.section_name_hint), false);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(6), dp(20), 0);
+        box.addView(name);
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle(R.string.section_rename)
+                .setView(box)
+                .setPositiveButton(R.string.save, null)
+                .setNegativeButton(R.string.key_cancel, null)
+                .create();
+        dlg.setOnShowListener(x -> dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String n = name.getText().toString().trim();
+            if (n.isEmpty()) {
+                toast(R.string.section_need_name);
+                return;
+            }
+            dlg.dismiss();
+            sectionRename(id, n);
+        }));
+        showSafe(dlg);
+    }
+
+    private void sectionRename(final String oldId, final String name) {
+        final String board = prefs.boardId();
+        final String base = prefs.base();
+        final String key = prefs.key();
+        final List<String> taskIds = new ArrayList<>();
+        JSONArray arr = lastTasks == null ? null : lastTasks.optJSONArray("tasks");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject t = arr.optJSONObject(i);
+                if (t == null) continue;
+                if (oldId.equals(t.optString("Section", ""))) taskIds.add(t.optString("Id", ""));
+            }
+        }
+        pool.execute(() -> {
+            int code = 0;
+            String newId = "";
+            try {
+                JSONObject body = new JSONObject();
+                body.put("name", name);
+                Api.Reply r = Api.post(base + "/api/b/section/add?b=" + board, key, body.toString());
+                code = r.status;
+                if (code == 200) {
+                    JSONObject sec = r.json().optJSONObject("section");
+                    newId = sec == null ? "" : sec.optString("id", "");
+                    if (newId.isEmpty()) code = -1;
+                }
+                if (code == 200) {
+                    for (String tid : taskIds) {
+                        if (tid.isEmpty()) continue;
+                        JSONObject up = new JSONObject();
+                        up.put("id", tid);
+                        up.put("section", newId);
+                        Api.Reply r2 = Api.post(base + "/api/b/update?b=" + board, key, up.toString());
+                        if (r2.status == 401 || r2.status == 403) {
+                            code = r2.status;
+                            break;
+                        }
+                    }
+                }
+                if (code == 200) {
+                    JSONObject del = new JSONObject();
+                    del.put("id", oldId);
+                    code = Api.post(base + "/api/b/section/del?b=" + board, key, del.toString()).status;
+                }
+            } catch (Api.AuthException e) {
+                code = 401;
+            } catch (Exception ignored) {
+                code = -1;
+            }
+            final int f = code;
+            uiPost(() -> {
+                if (f == 200) {
+                    toast(R.string.section_renamed);
+                    load();
+                } else {
+                    reportFailure(f);
+                }
+            });
+        });
+    }
+
+    private void confirmSectionDelete(final String id) {
+        String label = id;
+        for (String[] s : sections) {
+            if (s[0].equals(id)) label = s[1];
+        }
+        showSafe(new AlertDialog.Builder(this)
+                .setTitle(R.string.section_delete)
+                .setMessage(getString(R.string.section_delete_confirm, label))
+                .setPositiveButton(R.string.delete, (d, w) -> sectionDelete(id))
+                .setNegativeButton(R.string.key_cancel, null)
+                .create());
+    }
+
+    private void sectionDelete(final String id) {
+        final String board = prefs.boardId();
+        final String base = prefs.base();
+        final String key = prefs.key();
+        pool.execute(() -> {
+            int code = -1;
+            try {
+                JSONObject body = new JSONObject();
+                body.put("id", id);
+                code = Api.post(base + "/api/b/section/del?b=" + board, key, body.toString()).status;
+            } catch (Api.AuthException e) {
+                code = 401;
+            } catch (Exception ignored) {
+            }
+            final int f = code;
+            uiPost(() -> {
+                if (f == 200) {
+                    toast(R.string.section_deleted);
+                    if (id.equals(activeSection)) activeSection = "";
+                    load();
+                } else {
+                    reportFailure(f);
+                }
+            });
         });
     }
 
     private void renderChips() {
         chips.removeAllViews();
-        int vis = sections.isEmpty() ? View.GONE : View.VISIBLE;
-        chipsWrap.setVisibility(vis);
-        if (vis == View.GONE) return;
+        chipsWrap.setVisibility(View.VISIBLE);
 
         float d = getResources().getDisplayMetrics().density;
         chips.addView(chip(getString(R.string.all_sections), "", activeSection.isEmpty(), d));
@@ -544,11 +1342,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private TextView chip(String label, String id, boolean active, float d) {
+    private TextView chip(String label, final String id, boolean active, float d) {
         TextView tv = new TextView(this);
         tv.setText(label);
         tv.setTextSize(13f);
-        tv.setTypeface(tv.getTypeface(), active ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+        tv.setTypeface(tv.getTypeface(), active ? Typeface.BOLD : Typeface.NORMAL);
         int ph = (int) (14 * d);
         int pv = (int) (8 * d);
         tv.setPadding(ph, pv, ph, pv);
@@ -563,15 +1361,27 @@ public class MainActivity extends AppCompatActivity {
             renderChips();
             renderTasks(lastTasks);
         });
+        tv.setOnLongClickListener(v -> {
+            openSectionMenu(id);
+            return true;
+        });
         return tv;
     }
 
     private void renderTasks(JSONObject o) {
-        if (o == null) return;
+        View empty = findViewById(R.id.empty);
+        if (o == null) {
+            if (empty != null) empty.setVisibility(View.GONE);
+            return;
+        }
         lastTasks = o;
         List<Object> rows = new ArrayList<>();
         JSONArray arr = o.optJSONArray("tasks");
-        if (arr == null) return;
+        if (arr == null) {
+            adapter.setItems(rows);
+            if (empty != null) empty.setVisibility(tab == TAB_BOARD ? View.VISIBLE : View.GONE);
+            return;
+        }
 
         String[] groups = {"doing", "todo", "blocked", "done"};
         int[] names = {R.string.sec_now, R.string.sec_next, R.string.sec_wait, R.string.sec_done};
@@ -593,6 +1403,9 @@ public class MainActivity extends AppCompatActivity {
                 mt.id = t.optString("Id");
                 mt.title = t.optString("Title");
                 mt.note = t.optString("Note");
+                mt.status = st;
+                mt.mode = t.optString("Mode", "task");
+                mt.section = t.optString("Section", "");
                 mt.progress = t.optInt("Progress", 0);
                 mt.chip = t.optString("Mode", "").toUpperCase(Locale.ROOT);
                 bucket.add(mt);
@@ -603,16 +1416,20 @@ public class MainActivity extends AppCompatActivity {
             rows.addAll(bucket);
         }
         adapter.setItems(rows);
-        View empty = findViewById(R.id.empty);
-        if (empty != null) empty.setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+        if (empty != null) {
+            empty.setVisibility(rows.isEmpty() && tab == TAB_BOARD ? View.VISIBLE : View.GONE);
+        }
     }
 
     private String unitLabel(String unit) {
         if (unit == null) return "";
         switch (unit) {
-            case "шагов": return getString(R.string.unit_steps);
-            case "эпох": return getString(R.string.unit_epochs);
-            default: return unit;
+            case "шагов":
+                return getString(R.string.unit_steps);
+            case "эпох":
+                return getString(R.string.unit_epochs);
+            default:
+                return unit;
         }
     }
 
@@ -653,146 +1470,27 @@ public class MainActivity extends AppCompatActivity {
         JSONArray chain = o.optJSONArray("chainLines");
         StringBuilder sb = new StringBuilder();
         if (chain != null) {
-            int from = Math.max(0, chain.length() - 3);
+            int from = Math.max(0, chain.length() - 8);
             for (int i = from; i < chain.length(); i++) {
-                if (sb.length() > 0) sb.append((char) 10);
+                if (sb.length() > 0) sb.append('\n');
                 sb.append(chain.optString(i));
             }
         }
         trChain.setText(sb.length() == 0 ? "—" : sb.toString());
-        java.util.ArrayList<String> lines = new java.util.ArrayList<>();
-        if (chain != null) for (int i = Math.max(0, chain.length() - 8); i < chain.length(); i++) lines.add(chain.optString(i));
-        StringBuilder tail = new StringBuilder();
-        for (int i = lines.size() - 1; i >= 0; i--) {
-            if (tail.length() > 0) tail.append((char) 10);
-            tail.append(lines.get(i));
-        }
-        trTail.setText(tail.length() == 0 ? "—" : tail.toString());
-    }
 
-    // ---------- ключ ----------
-
-    private EditText field(LinearLayout box, String label, String value, String hint) {
-        int text = NxBackdrop.color(this, R.attr.nxText);
-        int dim = NxBackdrop.color(this, R.attr.nxTextDim);
-        TextView lb = new TextView(this);
-        lb.setText(label);
-        lb.setTextSize(11f);
-        lb.setLetterSpacing(0.1f);
-        lb.setTextColor(dim);
-        android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = (int) (14 * getResources().getDisplayMetrics().density);
-        box.addView(lb, lp);
-
-        EditText e = new EditText(this);
-        e.setSingleLine(true);
-        e.setText(value);
-        e.setHint(hint);
-        e.setTextSize(14f);
-        e.setTextColor(text);
-        e.setHintTextColor(dim);
-        box.addView(e);
-        return e;
-    }
-
-    private void openSettings() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (20 * getResources().getDisplayMetrics().density);
-        box.setPadding(pad, pad / 3, pad, 0);
-
-        EditText url = field(box, getString(R.string.f_server).toUpperCase(java.util.Locale.ROOT), prefs.base(), "https://board.nexus-your-heper.ru");
-        EditText key = field(box, getString(R.string.f_key).toUpperCase(java.util.Locale.ROOT), prefs.key(), getString(R.string.f_key_hint));
-        EditText board = field(box, getString(R.string.f_board).toUpperCase(java.util.Locale.ROOT), prefs.boardId(), getString(R.string.f_board_hint));
-
-        TextView hint = new TextView(this);
-        hint.setText(R.string.f_note);
-        hint.setTextSize(12f);
-        hint.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
-        android.widget.LinearLayout.LayoutParams hp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
-        hp.topMargin = (int) (14 * getResources().getDisplayMetrics().density);
-        box.addView(hint, hp);
-
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.key_title)
-                .setView(box)
-                .setPositiveButton(R.string.key_ok, (d, w) -> {
-                    prefs.base(url.getText().toString().trim());
-                    String k = key.getText().toString().trim();
-                    prefs.key(k);
-                    String bid = board.getText().toString().trim();
-                    if (bid.matches("^[a-f0-9]{16}$")) prefs.boardId(bid);
-                    if (k.isEmpty() && prefs.boardId().isEmpty()) registerBoard();
-                    recreate();
-                })
-                .setNegativeButton(R.string.key_cancel, null)
-                .show();
-    }
-
-
-    private boolean keyDialogShown = false;
-
-    private void askKey() {
-        if (keyDialogShown) return;
-        keyDialogShown = true;
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (20 * getResources().getDisplayMetrics().density);
-        box.setPadding(pad, pad / 2, pad, 0);
-
-        TextView hint = new TextView(this);
-        hint.setText(R.string.key_need);
-        hint.setTextSize(13f);
-        hint.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
-        box.addView(hint);
-
-        EditText input = new EditText(this);
-        input.setHint(R.string.key_hint);
-        input.setSingleLine(true);
-        input.setTextSize(16f);
-        input.setTextColor(NxBackdrop.color(this, R.attr.nxText));
-        input.setHintTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
-        input.setPadding(0, pad / 2, 0, 0);
-        input.setText(prefs.key());
-        box.addView(input);
-
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle(R.string.key_title)
-                .setView(box)
-                .setPositiveButton(R.string.key_ok, null)
-                .setNegativeButton(R.string.key_cancel, null)
-                .create();
-        d.setOnDismissListener(x -> keyDialogShown = false);
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String k = input.getText().toString().trim();
-            if (k.isEmpty()) {
-                Toast.makeText(this, R.string.key_need, Toast.LENGTH_SHORT).show();
-                return;
+        JSONArray log = o.optJSONArray("logLines");
+        if (log == null) log = o.optJSONArray("lines");
+        boolean hasLog = log != null && log.length() > 0;
+        if (trLogCard != null) trLogCard.setVisibility(hasLog ? View.VISIBLE : View.GONE);
+        if (hasLog) {
+            StringBuilder tail = new StringBuilder();
+            int from = Math.max(0, log.length() - 12);
+            for (int i = from; i < log.length(); i++) {
+                if (tail.length() > 0) tail.append('\n');
+                tail.append(log.optString(i));
             }
-            prefs.key(k);
-            d.dismiss();
-            load();
-        }));
-        d.show();
-    }
-
-    private void editBase() {
-        EditText input = new EditText(this);
-        input.setSingleLine(true);
-        input.setText(prefs.base());
-        new AlertDialog.Builder(this)
-                .setTitle("Сервер / Server")
-                .setView(input)
-                .setPositiveButton(R.string.key_ok, (dd, w) -> {
-                    prefs.base(input.getText().toString().trim());
-                    load();
-                })
-                .setNegativeButton(R.string.key_cancel, null)
-                .show();
+            trTail.setText(tail.toString());
+        }
     }
 
     // ---------- обновления ----------
@@ -802,7 +1500,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void checkUpdates(final boolean manual) {
-        if (pendingUpdate != null) return;
+        if (!pendingUpdate.isEmpty()) {
+            showUpdateStatus();
+            return;
+        }
         long last = prefs.lastUpdateCheck();
         if (!manual && System.currentTimeMillis() - last < 6L * 3600L * 1000L) return;
         if (manual) status.setText(R.string.loading);
@@ -816,49 +1517,131 @@ public class MainActivity extends AppCompatActivity {
                 final String name = o.optString("versionName", "");
                 final String file = o.optString("file", "");
                 final String notes = o.optString("notes", "");
+                final String sha = o.optString("sha256", "").trim().toLowerCase(Locale.ROOT);
                 if (code > BuildConfig.VERSION_CODE && !file.isEmpty()) {
-                    ui.post(() -> {
+                    uiPost(() -> {
                         pendingUpdate = file;
+                        pendingName = name;
                         pendingNotes = notes;
-                        status.setText(getString(R.string.update_available, name));
-                        status.setTextColor(NxBackdrop.color(this, R.attr.nxPrimary));
-                        status.setTypeface(Typeface.DEFAULT_BOLD);
-                        status.setOnClickListener(v -> downloadUpdate());
-                        findViewById(R.id.btn_update).setBackgroundResource(R.drawable.nx_pill_on);
+                        pendingSha = sha;
+                        prefs.update(file, name, notes, sha);
+                        showUpdateStatus();
                     });
-                } else if (manual) {
-                    ui.post(() -> Toast.makeText(this, R.string.update_none, Toast.LENGTH_SHORT).show());
+                } else {
+                    uiPost(() -> {
+                        if (!pendingUpdate.isEmpty()) {
+                            pendingUpdate = "";
+                            pendingName = "";
+                            pendingNotes = "";
+                            pendingSha = "";
+                            prefs.clearUpdate();
+                        }
+                        resetUpdateButton();
+                        if (manual) toast(R.string.update_none);
+                    });
                 }
             } catch (Exception ignored) {
             }
         });
     }
 
+    private void showUpdateStatus() {
+        if (pendingUpdate.isEmpty() || !alive()) return;
+        String label = pendingName.isEmpty() ? pendingUpdate : pendingName;
+        status.setText(getString(R.string.update_available, label));
+        status.setTextColor(NxBackdrop.color(this, R.attr.nxPrimary));
+        status.setTypeface(Typeface.DEFAULT_BOLD);
+        status.setOnClickListener(v -> openUpdateDialog());
+        View btn = findViewById(R.id.btn_update);
+        if (btn != null) btn.setBackgroundResource(R.drawable.nx_pill_on);
+    }
+
+    private void resetUpdateButton() {
+        View btn = findViewById(R.id.btn_update);
+        if (btn != null) btn.setBackgroundResource(R.drawable.nx_card);
+    }
+
+    private void openUpdateDialog() {
+        if (pendingUpdate.isEmpty() || !alive()) return;
+        String label = pendingName.isEmpty() ? pendingUpdate : pendingName;
+        String notes = pendingNotes.trim();
+        showSafe(new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_dialog_title, label))
+                .setMessage(notes.isEmpty() ? getString(R.string.update_no_notes) : notes)
+                .setPositiveButton(R.string.update_install, (d, w) -> downloadUpdate())
+                .setNegativeButton(R.string.close, null)
+                .create());
+    }
+
     private void downloadUpdate() {
-        if (pendingUpdate == null) return;
+        if (pendingUpdate.isEmpty()) {
+            checkUpdates(true);
+            return;
+        }
+        if (pendingApk != null && pendingApk.exists()) {
+            install(pendingApk);
+            return;
+        }
+        if (pendingSha.isEmpty()) {
+            toast(R.string.update_no_sha);
+            return;
+        }
         final String file = pendingUpdate;
+        final String expect = pendingSha;
         final String key = prefs.key();
         final String base = prefs.base();
         status.setText(R.string.update_dl);
-        status.setOnClickListener(null);
+        status.setOnClickListener(v -> openUpdateDialog());
         pool.execute(() -> {
+            File out = new File(getCacheDir(), "update.apk");
+            String got = "";
+            int code = 0;
             try {
-                byte[] data = Api.bytes(base + "/app/" + file, key);
-                File out = new File(getCacheDir(), "update.apk");
-                FileOutputStream fos = new FileOutputStream(out);
-                fos.write(data);
-                fos.close();
-                ui.post(() -> install(out));
-            } catch (Exception e) {
-                ui.post(() -> {
-                    status.setText(R.string.net_error);
-                    pendingUpdate = null;
-                });
+                got = Api.download(base + "/app/" + file, key, out);
+            } catch (Api.AuthException e) {
+                code = 401;
+            } catch (Exception ignored) {
+                code = -1;
             }
+            final int f = code;
+            final String g = got;
+            final File o = out;
+            uiPost(() -> {
+                if (f != 0) {
+                    reportFailure(f);
+                    showUpdateStatus();
+                    return;
+                }
+                if (!g.equalsIgnoreCase(expect)) {
+                    o.delete();
+                    toast(R.string.update_sha_bad);
+                    showUpdateStatus();
+                    return;
+                }
+                pendingApk = o;
+                install(o);
+            });
         });
     }
 
     private void install(File apk) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            showSafe(new AlertDialog.Builder(this)
+                    .setTitle(R.string.install_denied_title)
+                    .setMessage(R.string.install_denied_body)
+                    .setPositiveButton(R.string.install_settings, (d, w) -> {
+                        try {
+                            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                    Uri.parse("package:" + getPackageName())));
+                        } catch (Exception e) {
+                            toast(R.string.net_error);
+                        }
+                    })
+                    .setNegativeButton(R.string.close, null)
+                    .create());
+            return;
+        }
         status.setText(R.string.update_ready);
         Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apk);
         Intent i = new Intent(Intent.ACTION_VIEW);
@@ -867,13 +1650,14 @@ public class MainActivity extends AppCompatActivity {
         try {
             startActivity(i);
         } catch (Exception e) {
-            Toast.makeText(this, R.string.net_error, Toast.LENGTH_SHORT).show();
+            toast(R.string.install_failed);
         }
     }
 
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
+            if (!alive()) return;
             load();
             ui.postDelayed(this, lastFailed ? REFRESH_SLOW_MS : REFRESH_MS);
         }
@@ -882,7 +1666,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        load();
+        if (!loading) load();
         ui.removeCallbacks(tick);
         ui.postDelayed(tick, REFRESH_MS);
         if (tab == TAB_VIEWS) {
@@ -901,7 +1685,15 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        ui.removeCallbacksAndMessages(null);
+        if (openDialog != null) {
+            try {
+                openDialog.dismiss();
+            } catch (Exception ignored) {
+            }
+            openDialog = null;
+        }
         pool.shutdownNow();
+        super.onDestroy();
     }
 }

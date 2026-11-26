@@ -11,6 +11,13 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
 
+[assembly: System.Reflection.AssemblyTitle("Nexus Board")]
+[assembly: System.Reflection.AssemblyProduct("Nexus Board")]
+[assembly: System.Reflection.AssemblyCompany("Nexus x AutSquad")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.0")]
+[assembly: System.Reflection.AssemblyVersion("2.2.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.2.0")]
+
 namespace NexusBoard
 {
     static class Program
@@ -21,7 +28,8 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.1.1";
+        public const string Version = "2.2.0";
+        public const int VersionCode = 17;
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
@@ -31,11 +39,7 @@ namespace NexusBoard
         [STAThread]
         static void Main(string[] args)
         {
-            string[] cliVerbs = { "--add", "--plan", "--start", "--doing", "--done", "--block", "--blocked",
-                "--todo", "--drop", "--dropped", "--progress", "--note", "--log", "--mode", "--clear",
-                "--open", "--autostart", "--path", "--help", "-h", "--list", "--json", "--selftest", "--chat-list", "--chat", "--chat-say",
-                "--view-add", "--view-set", "--view-del", "--view-list", "--code-push", "--code-pull", "--sync" };
-            if (args.Length >= 1 && Array.IndexOf(cliVerbs, args[0]) >= 0)
+            if (NexusBoard.Cli.Cli.ShouldRunAsCli(args))
             {
                 AttachConsole(-1);
                 try
@@ -48,6 +52,17 @@ namespace NexusBoard
                     Console.WriteLine("ERR " + ex.Message);
                     Environment.ExitCode = 1;
                 }
+                return;
+            }
+
+            // неизвестный флаг раньше поднимал окно и висел — печатаем справку
+            if (args.Length >= 1 && args[0].StartsWith("--") &&
+                args[0] != "--shot" && args[0] != "--shotkey" && args[0] != "--theme" &&
+                args[0] != "--lang" && args[0] != "--view" && args[0] != "--open-key")
+            {
+                AttachConsole(-1);
+                Console.WriteLine(NexusBoard.Cli.Cli.HelpText());
+                Environment.ExitCode = 1;
                 return;
             }
 
@@ -76,8 +91,14 @@ namespace NexusBoard
             }
 
             ServicePointManager.DefaultConnectionLimit = 8;
-            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11;
-            try { ServicePointManager.ServerCertificateValidationCallback = (a, b, c, d) => true; } catch { }
+            try
+            {
+                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
+            }
+            catch
+            {
+                try { ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12; } catch { }
+            }
 
             if (args.Length >= 1 && args[0] == "/selftest")
             {
@@ -143,7 +164,7 @@ namespace NexusBoard
                 string thName = "midnight";
                 for (int i = 0; i < args.Length - 1; i++) if (args[i] == "--theme") thName = args[i + 1];
                 L.Lang = Array.IndexOf(args, "en") >= 0 ? "en" : "ru";
-                var dlg = new KeyDialog(Theme.Get(thName), "7140a973cfe1946d");
+                var dlg = new KeyDialog(Theme.Get(thName), "0123456789abcdef");
                 dlg.Shown += (s2, e2) =>
                 {
                     var tmr = new System.Windows.Forms.Timer { Interval = 900 };
@@ -333,6 +354,18 @@ namespace NexusBoard
             return b;
         }
 
+        bool UiAlive { get { return !IsDisposed && IsHandleCreated; } }
+
+        void Ui(Action action)
+        {
+            try
+            {
+                if (!UiAlive) return;
+                BeginInvoke(action);
+            }
+            catch { }
+        }
+
         void Pull()
         {
             ThreadPool.QueueUserWorkItem(_ =>
@@ -345,17 +378,17 @@ namespace NexusBoard
                     string content = Convert.ToString(code["content"]);
                     int ver = Convert.ToInt32(code["version"]);
                     string sha = Convert.ToString(code["sha"]);
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         version = ver;
                         box.Text = content;
                         meta.Text = "v" + ver + "  sha=" + sha;
                         pullBtn.Text = "забрать v" + ver;
-                    }));
+                    });
                 }
                 catch (Exception ex)
                 {
-                    BeginInvoke((Action)(() => meta.Text = "ERR " + ex.Message));
+                    Ui(() => meta.Text = "ERR " + ex.Message);
                 }
             });
         }
@@ -369,7 +402,7 @@ namespace NexusBoard
                 try { raw = api.CodeSave(board, id, content, version); }
                 catch (Exception ex)
                 {
-                    BeginInvoke((Action)(() => meta.Text = "ERR " + ex.Message));
+                    Ui(() => meta.Text = "ERR " + ex.Message);
                     return;
                 }
                 var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
@@ -378,12 +411,12 @@ namespace NexusBoard
                 {
                     int ver = Convert.ToInt32(o["version"]);
                     string sha = Convert.ToString(o["sha"]);
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         version = ver;
                         meta.Text = "сохранено: v" + ver + "  sha=" + sha;
                         pullBtn.Text = "забрать v" + ver;
-                    }));
+                    });
                     return;
                 }
                 string err = o != null && o.ContainsKey("error") ? Convert.ToString(o["error"]) : raw;
@@ -391,7 +424,7 @@ namespace NexusBoard
                 {
                     string fresh = o.ContainsKey("content") ? Convert.ToString(o["content"]) : "";
                     int ver = o.ContainsKey("version") ? Convert.ToInt32(o["version"]) : version;
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         MessageBox.Show(this,
                             "На сервере уже более новая версия (v" + ver + ").\nСейчас подтяну её — свою правку скопируй заранее.",
@@ -400,10 +433,10 @@ namespace NexusBoard
                         if (!string.IsNullOrEmpty(fresh)) box.Text = fresh;
                         meta.Text = "конфликт: подтянул v" + ver;
                         pullBtn.Text = "забрать v" + ver;
-                    }));
+                    });
                     return;
                 }
-                BeginInvoke((Action)(() => meta.Text = "ERR " + err));
+                Ui(() => meta.Text = "ERR " + err);
             });
         }
     }
@@ -670,6 +703,56 @@ namespace NexusBoard
             Post("/api/b/section/add?b=" + board, new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "name", name } }));
         }
 
+        /// <summary>Возвращает id созданного раздела (сервер сам его выдаёт) или "".</summary>
+        public string AddSectionEx(string board, string name)
+        {
+            try
+            {
+                string raw = Post("/api/b/section/add?b=" + board,
+                    new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "name", name } }));
+                var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
+                var sec = o != null && o.ContainsKey("section") ? o["section"] as Dictionary<string, object> : null;
+                if (sec != null && sec.ContainsKey("id")) return Convert.ToString(sec["id"]);
+            }
+            catch { }
+            return "";
+        }
+
+        int PostStatus(string path, string json)
+        {
+            try
+            {
+                Post(path, json);
+                return 200;
+            }
+            catch (WebException e)
+            {
+                var r = e.Response as HttpWebResponse;
+                return r == null ? 0 : (int)r.StatusCode;
+            }
+            catch { return 0; }
+        }
+
+        /// <summary>POST /api/b/delete — настоящие удаление задачи. 200 ок, 404 — старый сервер.</summary>
+        public int DeleteTask(string board, string id)
+        {
+            return PostStatus("/api/b/delete?b=" + board,
+                new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "id", id } }));
+        }
+
+        /// <summary>POST /api/b/section/set — переименование раздела. 404 — маршрута нет.</summary>
+        public int SectionSave(string board, string id, string name)
+        {
+            return PostStatus("/api/b/section/set?b=" + board,
+                new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "id", id }, { "name", name } }));
+        }
+
+        public int SectionDel(string board, string id)
+        {
+            return PostStatus("/api/b/section/del?b=" + board,
+                new JavaScriptSerializer().Serialize(new Dictionary<string, object> { { "id", id } }));
+        }
+
         public Dictionary<string, object> ChatList(string board, long since)
         {
             return new JavaScriptSerializer().DeserializeObject(
@@ -845,9 +928,16 @@ namespace NexusBoard
         Panel chatBar;
         TextBox chatInput;
         FlatButton chatSend;
-        string updateVersion = "";
-        System.Windows.Forms.Timer timer;
-        ContextMenuStrip menu;
+        string updateVersion = "", updateFile = "", updateSha = "";
+        int updateCode;
+        System.Windows.Forms.Timer timer, resizeTimer;
+        ContextMenuStrip menu, sectionMenu;
+        ToolTip tipUpdate;
+        EventWaitHandle showWaitEvent;
+        RegisteredWaitHandle showWaitRegistered;
+        int renderedWidth;
+        bool chatReloadPending;
+        bool closing;
 
         public MainForm()
         {
@@ -872,20 +962,16 @@ namespace NexusBoard
             try
             {
                 bool created;
-                var showEvt = new EventWaitHandle(false, EventResetMode.AutoReset, NexusBoard.Cli.Ui.ShowEventName, out created);
-                ThreadPool.RegisterWaitForSingleObject(showEvt, (s, timedOut) =>
+                showWaitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, NexusBoard.Cli.Ui.ShowEventName, out created);
+                showWaitRegistered = ThreadPool.RegisterWaitForSingleObject(showWaitEvent, (s, timedOut) =>
                 {
-                    try
+                    Ui(() =>
                     {
-                        BeginInvoke((Action)(() =>
-                        {
-                            if (!Visible) Show();
-                            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-                            Activate();
-                            Program.SetForegroundWindow(Handle);
-                        }));
-                    }
-                    catch { }
+                        if (!Visible) Show();
+                        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                        Activate();
+                        Program.SetForegroundWindow(Handle);
+                    });
                 }, null, Timeout.Infinite, false);
             }
             catch { }
@@ -893,7 +979,23 @@ namespace NexusBoard
             Shown += (s, e) =>
             {
                 ApplyTheme();
-                if (string.IsNullOrEmpty(boardId)) CreateBoard(); else LoadBoard();
+                bool brokenKey = false;
+                if (!string.IsNullOrEmpty(boardId) && !IsBoardKey(boardId))
+                {
+                    // ключ из старых настроек не hex — молча в «нет связи» не сидим
+                    lblSub.Text = L.Lang == "en" ? "board key is broken — reconnect" : "ключ доски битый — подключи заново";
+                    boardId = "";
+                    settings.Board = "";
+                    settings.Save();
+                    brokenKey = true;
+                }
+                if (brokenKey)
+                {
+                    ShowConnect();
+                    if (string.IsNullOrEmpty(boardId)) CreateBoard();
+                }
+                else if (string.IsNullOrEmpty(boardId)) CreateBoard();
+                else LoadBoard();
                 CheckUpdate();
                 if (Program.OpenKeyOnStart)
                 {
@@ -905,8 +1007,8 @@ namespace NexusBoard
 
             KeyDown += (s, e) =>
             {
-                if (e.KeyCode == Keys.F5) LoadBoard();
-                if (e.Control && e.KeyCode == Keys.N) EditTask(null);
+                if (e.KeyCode == Keys.F5) { RefreshActive(); e.SuppressKeyPress = true; }
+                if (e.Control && e.KeyCode == Keys.N && CanAddTask()) { EditTask(null); e.SuppressKeyPress = true; }
                 if (e.Control && e.Alt && e.KeyCode == Keys.S) OpenSettings();
             };
 
@@ -922,6 +1024,71 @@ namespace NexusBoard
         }
 
         int boardBusy, chatBusy, trainBusy;
+
+        bool UiAlive
+        {
+            get { return !closing && !IsDisposed && !Disposing && IsHandleCreated; }
+        }
+
+        /// <summary>Единственная точка возврата в UI-поток: при закрытом окне просто молчит.</summary>
+        void Ui(Action action)
+        {
+            if (action == null) return;
+            try
+            {
+                if (!UiAlive) return;
+                BeginInvoke(action);
+            }
+            catch { }
+        }
+
+        bool HasNexusKey()
+        {
+            return settings != null && !string.IsNullOrEmpty((settings.Key ?? "").Trim());
+        }
+
+        bool CanAddTask()
+        {
+            return !chatView && !trainView && !viewsView && !string.IsNullOrEmpty(boardId);
+        }
+
+        void RefreshActive()
+        {
+            if (chatView) LoadChat(false);
+            else if (trainView) LoadTrain();
+            else if (viewsView) LoadViews();
+            else LoadBoard();
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            closing = true;
+            try { if (timer != null) timer.Stop(); } catch { }
+            try { if (resizeTimer != null) resizeTimer.Stop(); } catch { }
+            try
+            {
+                if (showWaitRegistered != null)
+                {
+                    showWaitRegistered.Unregister(null);
+                    showWaitRegistered = null;
+                }
+            }
+            catch { }
+            try
+            {
+                if (showWaitEvent != null)
+                {
+                    showWaitEvent.Close();
+                    showWaitEvent.Dispose();
+                    showWaitEvent = null;
+                }
+            }
+            catch { }
+            try { if (tipUpdate != null) { tipUpdate.Dispose(); tipUpdate = null; } } catch { }
+            try { if (sectionMenu != null) { sectionMenu.Dispose(); sectionMenu = null; } } catch { }
+            try { if (menu != null) { menu.Dispose(); menu = null; } } catch { }
+            base.OnFormClosing(e);
+        }
 
         void BuildUi()
         {
@@ -954,21 +1121,32 @@ namespace NexusBoard
             header.Controls.Add(btnMenu);
 
             btnRefresh = new FlatButton { Text = "⟳", Font = FontCache.Get("Segoe UI", 14f, FontStyle.Regular), Size = new Size(46, 40) };
-            btnRefresh.Click += (s, e) => LoadBoard();
+            btnRefresh.Click += (s, e) => RefreshActive();
             header.Controls.Add(btnRefresh);
 
             btnKey = new FlatButton { Text = "КЛЮЧ", Font = FontCache.Get("Segoe UI Semibold", 8.5f, FontStyle.Bold), Size = new Size(58, 40) };
             btnKey.Click += (s, e) => ShowConnect();
             header.Controls.Add(btnKey);
 
-            btnUpdate = new FlatButton { Text = "↓", Size = new Size(46, 40) };
+            btnUpdate = new FlatButton { Text = "↓", Size = new Size(46, 40), Visible = false };
             btnUpdate.Click += Click_Update;
+            tipUpdate = new ToolTip();
             header.Controls.Add(btnUpdate);
 
-            var bar = new Panel { Dock = DockStyle.Top, Height = 58, BackColor = Color.Transparent };
+            var bar = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Color.Transparent, Padding = new Padding(30, 4, 26, 4) };
             Controls.Add(bar);
             bar.BringToFront();
-            tabs = new FlowLayoutPanel { Location = new Point(30, 6), Height = 44, AutoSize = true, WrapContents = false, BackColor = Color.Transparent };
+            tabs = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = false,
+                AutoScroll = true,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                BackColor = Color.Transparent,
+                Padding = new Padding(0, 0, 0, 2)
+            };
+            tabs.MouseWheel += (s, e) => ScrollTabs(-e.Delta);
             bar.Controls.Add(tabs);
 
             chatBar = new Panel { Dock = DockStyle.Bottom, Height = 72, BackColor = Color.Transparent, Visible = false };
@@ -1009,7 +1187,22 @@ namespace NexusBoard
 
             BuildMenu();
 
-            Resize += (s, e) => LayoutHeader();
+            resizeTimer = new System.Windows.Forms.Timer { Interval = 150 };
+            resizeTimer.Tick += (s, e) =>
+            {
+                resizeTimer.Stop();
+                LayoutHeader();
+                if (list != null && renderedWidth != list.ClientSize.Width) Render();
+            };
+            Resize += (s, e) =>
+            {
+                LayoutHeader();
+                if (resizeTimer != null)
+                {
+                    resizeTimer.Stop();
+                    resizeTimer.Start();
+                }
+            };
             Shown += (s, e) => LayoutHeader();
         }
 
@@ -1131,6 +1324,11 @@ namespace NexusBoard
 
         void BuildMenu()
         {
+            if (menu != null)
+            {
+                try { menu.Dispose(); } catch { }
+                menu = null;
+            }
             menu = new ContextMenuStrip { Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular), ShowImageMargin = false };
             menu.Opening += (s, e) => StyleMenu();
             menu.Items.Add(new ToolStripMenuItem("＋ " + (L.Lang == "en" ? "New task" : "Новая задача"), null, (s, e) => EditTask(null)));
@@ -1158,14 +1356,37 @@ namespace NexusBoard
 
         void StyleMenu()
         {
-            menu.BackColor = th.Panel;
-            menu.ForeColor = th.Text;
-            menu.Renderer = new ToolStripProfessionalRenderer(new MenuColors(th));
-            foreach (ToolStripItem it in menu.Items)
+            StyleMenuStrip(menu);
+        }
+
+        void StyleMenuStrip(ContextMenuStrip ms)
+        {
+            if (ms == null) return;
+            ms.BackColor = th.Panel;
+            ms.ForeColor = th.Text;
+            ms.Renderer = new ToolStripProfessionalRenderer(new MenuColors(th));
+            foreach (ToolStripItem it in ms.Items)
             {
                 it.ForeColor = th.Text;
                 it.BackColor = th.Panel;
             }
+        }
+
+        void ScrollTabs(int delta)
+        {
+            if (tabs == null) return;
+            try
+            {
+                var hs = tabs.HorizontalScroll;
+                int max = Math.Max(0, hs.Maximum - hs.LargeChange + 1);
+                int next = Math.Max(0, Math.Min(max, hs.Value + delta));
+                if (next != hs.Value)
+                {
+                    tabs.HorizontalScroll.Value = next;
+                    tabs.PerformLayout();
+                }
+            }
+            catch { }
         }
 
         void LayoutHeader()
@@ -1272,6 +1493,8 @@ namespace NexusBoard
 
         void Render()
         {
+            if (trainView && !HasNexusKey()) trainView = false;
+            if (list != null) renderedWidth = list.ClientSize.Width;
             RenderTabs();
             if (chatView) RenderChat();
             else if (trainView) RenderTraining();
@@ -1290,13 +1513,119 @@ namespace NexusBoard
         void RenderTabs()
         {
             ClearControls(tabs);
-            tabs.Controls.Add(TabChip(L.T("tab_board"), "__board", !trainView && !chatView));
+            tabs.Controls.Add(TabChip(L.T("tab_board"), "__board", !trainView && !chatView && !viewsView));
             tabs.Controls.Add(TabChip(L.T("tab_views"), "__views", viewsView));
-            tabs.Controls.Add(TabChip(L.T("tab_train"), "__train", trainView));
+            if (HasNexusKey()) tabs.Controls.Add(TabChip(L.T("tab_train"), "__train", trainView));
             tabs.Controls.Add(TabChip(L.T("tab_chat"), "__chat", chatView));
             if (trainView || chatView || viewsView) return;
             tabs.Controls.Add(TabChip(L.T("all"), "", activeSection == ""));
-            foreach (var s in sections) tabs.Controls.Add(TabChip(s.Name, s.Id, activeSection == s.Id));
+            foreach (var s in sections) tabs.Controls.Add(SectionChip(s));
+        }
+
+        /// <summary>Вкладка раздела с контекстным меню «переименовать / удалить».</summary>
+        Control SectionChip(SectionItem sec)
+        {
+            var chip = TabChip(sec.Name, sec.Id, activeSection == sec.Id);
+            chip.Tag = sec;
+            foreach (Control c in chip.Controls) c.Tag = sec;
+            if (sectionMenu == null) InitSectionMenu();
+            if (sectionMenu != null)
+            {
+                if (sectionMenu.Items.Count > 1)
+                {
+                    sectionMenu.Items[0].Text = L.Lang == "en" ? "Rename" : "Переименовать";
+                    sectionMenu.Items[1].Text = L.T("delete");
+                }
+                chip.ContextMenuStrip = sectionMenu;
+                foreach (Control c in chip.Controls) c.ContextMenuStrip = sectionMenu;
+            }
+            return chip;
+        }
+
+        void InitSectionMenu()
+        {
+            sectionMenu = new ContextMenuStrip { Font = FontCache.Get("Segoe UI", 9.5f, FontStyle.Regular), ShowImageMargin = false };
+            sectionMenu.Items.Add(new ToolStripMenuItem(L.Lang == "en" ? "Rename" : "Переименовать", null,
+                (s, e) => { var sec = SectionFromMenu(); if (sec != null) RenameSection(sec); }));
+            sectionMenu.Items.Add(new ToolStripMenuItem(L.T("delete"), null,
+                (s, e) => { var sec = SectionFromMenu(); if (sec != null) DeleteSection(sec); }));
+            sectionMenu.Opening += (s, e) => StyleMenuStrip(sectionMenu);
+        }
+
+        SectionItem SectionFromMenu()
+        {
+            if (sectionMenu == null) return null;
+            var c = sectionMenu.SourceControl;
+            while (c != null)
+            {
+                if (c.Tag is SectionItem) return (SectionItem)c.Tag;
+                c = c.Parent;
+            }
+            return null;
+        }
+
+        void RenameSection(SectionItem sec)
+        {
+            if (sec == null || string.IsNullOrEmpty(boardId)) return;
+            string name = Prompt.Show(this, L.Lang == "en" ? "Rename section" : "Переименовать раздел", L.T("sectname"), th);
+            name = (name ?? "").Trim();
+            if (name.Length == 0 || name == sec.Name) return;
+            var moveIds = tasks.Where(t => t.Section == sec.Id).Select(t => t.Id).ToList();
+            string b = boardId;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                int code;
+                try { code = api.SectionSave(b, sec.Id, name); }
+                catch { code = 0; }
+                if (code == 404)
+                {
+                    // старый сервер: переименовать можно только через новый раздел
+                    string newId = "";
+                    try { newId = api.AddSectionEx(b, name); } catch { }
+                    if (!string.IsNullOrEmpty(newId))
+                    {
+                        foreach (var id in moveIds)
+                        {
+                            try { api.UpdateTask(b, id, new Dictionary<string, object> { { "section", newId } }); } catch { }
+                        }
+                        try { api.SectionDel(b, sec.Id); } catch { }
+                        code = 200;
+                    }
+                }
+                if (code == 200)
+                {
+                    Ui(() => LoadBoard());
+                    return;
+                }
+                Ui(() => MessageBox.Show(this,
+                    L.Lang == "en" ? "Server refused to rename the section." : "Сервер не дал переименовать раздел.",
+                    "Nexus Board"));
+            });
+        }
+
+        void DeleteSection(SectionItem sec)
+        {
+            if (sec == null || string.IsNullOrEmpty(boardId)) return;
+            string q = L.Lang == "en"
+                ? "Delete section \"" + sec.Name + "\"? Tasks stay on the board, they just lose the section."
+                : "Удалить раздел «" + sec.Name + "»? Задачи останутся на доске, просто без раздела.";
+            if (MessageBox.Show(this, q, "Nexus Board", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            string b = boardId;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                int code;
+                try { code = api.SectionDel(b, sec.Id); }
+                catch { code = 0; }
+                Ui(() =>
+                {
+                    if (code == 404)
+                        MessageBox.Show(this,
+                            L.Lang == "en" ? "Server does not support section delete — update the server." : "Сервер не поддерживает удаление раздела — обнови сервер.",
+                            "Nexus Board");
+                    if (activeSection == sec.Id) activeSection = "";
+                    LoadBoard();
+                });
+            });
         }
 
         Control TabChip(string text, string id, bool active)
@@ -1371,18 +1700,18 @@ namespace NexusBoard
                             }
                         }
                     }
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         blocks = parsed;
                         feed = parsedFeed;
                         blocksVersion = ver;
                         lastSync = DateTime.Now;
                         Render();
-                    }));
+                    });
                 }
                 catch
                 {
-                    BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
+                    Ui(() => lblSub.Text = L.T("offline"));
                 }
                 finally { Interlocked.Exchange(ref boardBusy, 0); }
             });
@@ -2015,7 +2344,7 @@ namespace NexusBoard
                 try
                 {
                     string id = api.NewBoard();
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         if (!string.IsNullOrEmpty(id))
                         {
@@ -2026,11 +2355,11 @@ namespace NexusBoard
                             LoadBoard();
                         }
                         else lblSub.Text = L.T("offline");
-                    }));
+                    });
                 }
                 catch
                 {
-                    BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
+                    Ui(() => lblSub.Text = L.T("offline"));
                 }
             });
         }
@@ -2070,16 +2399,16 @@ namespace NexusBoard
                 try
                 {
                     var data = api.Train();
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         train = data;
                         lastSync = DateTime.Now;
                         Render();
-                    }));
+                    });
                 }
                 catch
                 {
-                    BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
+                    Ui(() => lblSub.Text = L.T("offline"));
                 }
                 finally { Interlocked.Exchange(ref trainBusy, 0); }
             });
@@ -2117,7 +2446,7 @@ namespace NexusBoard
             foreach (var m in chatMsgs)
             {
                 bool mine = m.From == "owner";
-                int bubbleWidth = Math.Min(width, 640);
+                int bubbleWidth = Math.Max(220, Math.Min(width, 640));
                 var bubble = new Round
                 {
                     Radius = 16,
@@ -2128,7 +2457,7 @@ namespace NexusBoard
                 };
                 var head = new Label
                 {
-                    Text = (mine ? L.T("chat_me") : L.T("chat_ai")) + " · " + DateTimeOffset.FromUnixTimeMilliseconds(m.Ts).ToLocalTime().ToString("HH:mm"),
+                    Text = (mine ? L.T("chat_me") : L.T("chat_ai")) + " · " + ChatTime(m.Ts),
                     AutoSize = true,
                     Location = new Point(18, 12),
                     ForeColor = mine ? th.AccentText : th.Dim,
@@ -2165,96 +2494,146 @@ namespace NexusBoard
             {
                 chatMsgs.Clear();
                 chatLast = 0;
+                if (chatView) RenderChat();
             }
-            if (Interlocked.CompareExchange(ref chatBusy, 1, 0) == 1) return;
+            if (Interlocked.CompareExchange(ref chatBusy, 1, 0) == 1)
+            {
+                // запрос уже в пути — вернёмся за результатом ещё раз, а не теряем его
+                chatReloadPending = true;
+                return;
+            }
             long since = chatLast;
+            string b = boardId;
             ThreadPool.QueueUserWorkItem(_ =>
             {
+                List<ChatMsg> fresh = null;
                 try
                 {
-                    var snap = api.ChatList(boardId, since);
-                    if (snap == null) return;
-                    var fresh = new List<ChatMsg>();
-                    if (snap.ContainsKey("messages") && snap["messages"] is object[])
+                    var snap = api.ChatList(b, since);
+                    if (snap != null)
                     {
-                        foreach (var o in (object[])snap["messages"])
+                        fresh = new List<ChatMsg>();
+                        if (snap.ContainsKey("messages") && snap["messages"] is object[])
                         {
-                            var d = o as Dictionary<string, object>;
-                            if (d == null) continue;
-                            fresh.Add(new ChatMsg
+                            foreach (var o in (object[])snap["messages"])
                             {
-                                Id = Str(d, "id"),
-                                From = Str(d, "from"),
-                                Text = Str(d, "text"),
-                                Ts = Convert.ToInt64(d.ContainsKey("ts") ? d["ts"] : 0L)
-                            });
+                                var d = o as Dictionary<string, object>;
+                                if (d == null) continue;
+                                long ts = 0;
+                                try { ts = Convert.ToInt64(d.ContainsKey("ts") ? d["ts"] : 0L); } catch { ts = 0; }
+                                fresh.Add(new ChatMsg
+                                {
+                                    Id = Str(d, "id"),
+                                    From = Str(d, "from"),
+                                    Text = Str(d, "text"),
+                                    Ts = ts
+                                });
+                            }
                         }
                     }
-                    BeginInvoke((Action)(() =>
-                    {
-                        foreach (var msg in fresh)
-                        {
-                            if (chatMsgs.Exists(x => x.Id == msg.Id)) continue;
-                            chatMsgs.Add(msg);
-                            if (msg.Ts > chatLast) chatLast = msg.Ts;
-                        }
-                        if (chatMsgs.Count > 300) chatMsgs = chatMsgs.GetRange(chatMsgs.Count - 300, 300);
-                        if (chatView) RenderChat();
-                        lblSub.Text = chatLast > 0
-                            ? (L.Lang == "en" ? "chat · replies come from the AI" : "чат · отвечает ИИ")
-                            : (L.Lang == "en" ? "chat" : "чат");
-                    }));
                 }
-                catch { }
-                finally { Interlocked.Exchange(ref chatBusy, 0); }
+                catch { fresh = null; }
+
+                Interlocked.Exchange(ref chatBusy, 0);
+                if (fresh != null)
+                {
+                    var got = fresh;
+                    Ui(() => ApplyChat(got));
+                }
+                else
+                {
+                    Ui(() => lblSub.Text = L.T("offline"));
+                }
+                if (chatReloadPending)
+                {
+                    chatReloadPending = false;
+                    Ui(() => LoadChat(false));
+                }
             });
+        }
+
+        void ApplyChat(List<ChatMsg> fresh)
+        {
+            foreach (var msg in fresh)
+            {
+                if (!string.IsNullOrEmpty(msg.Id) && chatMsgs.Exists(x => x.Id == msg.Id)) continue;
+                if (msg.From == "owner")
+                    chatMsgs.RemoveAll(x => x.Id != null && x.Id.StartsWith("local:", StringComparison.Ordinal) && x.Text == msg.Text);
+                chatMsgs.Add(msg);
+                if (msg.Ts > chatLast) chatLast = msg.Ts;
+            }
+            if (chatMsgs.Count > 300) chatMsgs = chatMsgs.GetRange(chatMsgs.Count - 300, 300);
+            if (chatView) RenderChat();
+            lblSub.Text = chatLast > 0
+                ? (L.Lang == "en" ? "chat · replies come from the AI" : "чат · отвечает ИИ")
+                : (L.Lang == "en" ? "chat" : "чат");
+        }
+
+        /// <summary>Битый ts не должен валить окно: без времени — прочерк, а не 03:00 1970.</summary>
+        static string ChatTime(long ts)
+        {
+            if (ts <= 0) return "—";
+            try
+            {
+                long ms = ts < 100000000000L ? ts * 1000 : ts;
+                return DateTimeOffset.FromUnixTimeMilliseconds(ms).ToLocalTime().ToString("HH:mm");
+            }
+            catch { return "—"; }
         }
 
         void SendChat()
         {
             string text = (chatInput.Text ?? "").Trim();
             if (text.Length == 0 || string.IsNullOrEmpty(boardId)) return;
+
+            // пузырь появляется сразу, сеть — потом
+            var mine = new ChatMsg
+            {
+                Id = "local:" + Guid.NewGuid().ToString("N"),
+                From = "owner",
+                Text = text,
+                Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+            chatMsgs.Add(mine);
             chatInput.Text = "";
-            try
+            if (chatView) RenderChat();
+            chatSend.Enabled = false;
+
+            string b = boardId;
+            ThreadPool.QueueUserWorkItem(_ =>
             {
-                api.ChatSend(boardId, "owner", text);
-                LoadChat(false);
-            }
-            catch
-            {
-                chatInput.Text = text;
-            }
+                bool ok = true;
+                try { api.ChatSend(b, "owner", text); }
+                catch { ok = false; }
+                Ui(() =>
+                {
+                    chatSend.Enabled = true;
+                    if (!ok)
+                    {
+                        chatMsgs.RemoveAll(x => x.Id == mine.Id);
+                        if (chatInput.Text.Length == 0) chatInput.Text = text;
+                        lblSub.Text = L.T("offline");
+                        if (chatView) RenderChat();
+                    }
+                    LoadChat(false);
+                });
+            });
         }
 
         void RenderTraining()
         {
-            if (string.IsNullOrEmpty(settings.Key))
-            {
-                ClearControls(list);
-                var hint = new Round { Radius = 18, Fill = th.Card, BorderColor = th.Line, Size = new Size(560, 108) };
-                hint.Controls.Add(new Label
-                {
-                    Text = L.Lang == "en"
-                        ? "Training needs the site access key.\nSettings (Ctrl+Alt+S) → field «Site key»."
-                        : "Для обучения нужен ключ доступа к сайту.\nНастройки (Ctrl+Alt+S) → поле «Ключ сайта».",
-                    Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    ForeColor = th.Dim,
-                    BackColor = Color.Transparent,
-                    Font = FontCache.Get("Segoe UI", 10f, FontStyle.Regular)
-                });
-                list.Controls.Add(hint);
-                return;
-            }
             ClearControls(list);
             list.FlowDirection = FlowDirection.TopDown;
             list.WrapContents = false;
             int w = Math.Max(600, list.ClientSize.Width - 60);
 
-            if (string.IsNullOrEmpty(settings.Key))
+            if (!HasNexusKey())
             {
                 var card = Card(w, 110);
-                card.Controls.Add(Abs(Txt(L.T("tr_nokey"), th, 10f, false, th.Dim), 20, 22));
+                card.Controls.Add(Abs(Txt(L.Lang == "en"
+                    ? "Training is hidden for regular boards.\nSettings (Ctrl+Alt+S) → field «Nexus key»."
+                    : "Обучение видно только с ключом Nexus.\nНастройки (Ctrl+Alt+S) → поле «Ключ Nexus».",
+                    th, 10f, false, th.Dim), 20, 22));
                 list.Controls.Add(card);
                 return;
             }
@@ -2268,8 +2647,9 @@ namespace NexusBoard
 
             bool alive = Str(train, "alive") == "True" || Str(train, "alive") == "true";
             string run = train.ContainsKey("run") ? Str(train, "run") : "—";
-            string stage = train.ContainsKey("stage") ? Str(train, "stage") : "";
-            string unit = train.ContainsKey("unit") ? Str(train, "unit") : "";
+            string stage = TrainText(train.ContainsKey("stage") ? Str(train, "stage") : "");
+            string unit = TrainText(train.ContainsKey("unit") ? Str(train, "unit") : "");
+            string rate = TrainText(train.ContainsKey("rate") ? Str(train, "rate") : "—");
             double pct = train.ContainsKey("pct") ? Num(train, "pct") : 0;
             string step = "—";
             if (train.ContainsKey("step"))
@@ -2280,7 +2660,14 @@ namespace NexusBoard
                 alive ? th.Accent : Color.FromArgb(214, 132, 52)), 22, 18));
             head.Controls.Add(Abs(Txt(run, th, 20f, true, th.Text), 22, 42));
             head.Controls.Add(Abs(Txt((stage + (string.IsNullOrEmpty(unit) ? "" : " · " + unit)).Trim(), th, 9.5f, false, th.Dim), 22, 84));
-            var bar = new Bar { Value = (int)Math.Round(pct), Location = new Point(22, 112), Size = new Size(w - 44, 8) };
+            var bar = new Bar
+            {
+                Value = (int)Math.Round(pct),
+                Track = th.Name == "frost" ? Color.FromArgb(222, 230, 244) : th.Line,
+                Fill = th.Accent,
+                Location = new Point(22, 112),
+                Size = new Size(w - 44, 8)
+            };
             head.Controls.Add(bar);
             head.Controls.Add(Abs(Txt(step, th, 10f, false, th.Text), 22, 130));
             list.Controls.Add(head);
@@ -2296,7 +2683,7 @@ namespace NexusBoard
             int mw = Math.Max(150, (w - 36) / 4);
             metrics.Controls.Add(Metric(L.T("tr_loss"), train.ContainsKey("loss") ? Num(train, "loss").ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture) : "—", mw));
             metrics.Controls.Add(Metric(L.T("tr_eta"), train.ContainsKey("remain") ? Str(train, "remain") : "—", mw));
-            metrics.Controls.Add(Metric(L.T("tr_rate"), train.ContainsKey("rate") ? Str(train, "rate") : "—", mw));
+            metrics.Controls.Add(Metric(L.T("tr_rate"), rate, mw));
             metrics.Controls.Add(Metric(L.T("tr_step"), train.ContainsKey("step") ? Convert.ToString(train["step"]) : "—", mw));
             list.Controls.Add(metrics);
 
@@ -2304,15 +2691,54 @@ namespace NexusBoard
             chain.AutoSize = false;
             chain.Height = 128;
             chain.Controls.Add(Abs(Txt(L.T("tr_chain"), th, 8.5f, true, th.Dim), 20, 14));
-            chain.Controls.Add(Abs(Txt(Join(train, "chainLines", 6), th, 8.5f, false, th.Dim), 20, 38));
+            var chainText = Txt(Join(train, "chainLines", 6), th, 8.5f, false, th.Dim);
+            chainText.Font = FontCache.Get("Consolas", 8.5f, FontStyle.Regular);
+            chain.Controls.Add(Abs(chainText, 20, 38));
             list.Controls.Add(chain);
 
-            var log = Card(w, 150);
+            var log = Card(w, 0);
+            log.AutoSize = false;
+            log.Height = 168;
             log.Controls.Add(Abs(Txt(L.T("tr_log"), th, 8.5f, true, th.Dim), 20, 14));
-            var mono = Txt(Join(train, "chainLines", 10), th, 8.5f, false, th.Dim);
+            var mono = Txt(LogTail(10), th, 8.5f, false, th.Dim);
             mono.Font = FontCache.Get("Consolas", 8.5f, FontStyle.Regular);
             log.Controls.Add(Abs(mono, 20, 38));
             list.Controls.Add(log);
+        }
+
+        /// <summary>Русские единицы сервера («шагов», «с/шаг») в английском интерфейсе.</summary>
+        static string TrainText(string s)
+        {
+            if (string.IsNullOrEmpty(s) || L.Lang != "en") return s;
+            return s.Replace("примеров", "examples")
+                    .Replace("шагов", "steps")
+                    .Replace("прим/с", "ex/s")
+                    .Replace("с/шаг", "s/step");
+        }
+
+        /// <summary>Хвост лога: logLines/lines/log из ответа, иначе собираем из того, что сервер отдаёт.</summary>
+        string LogTail(int tail)
+        {
+            if (train == null) return "—";
+            object v;
+            if (train.TryGetValue("logLines", out v) && v is object[]) return Join(train, "logLines", tail);
+            if (train.TryGetValue("lines", out v) && v is object[]) return Join(train, "lines", tail);
+            if (train.TryGetValue("log", out v) && v is object[]) return Join(train, "log", tail);
+            var parts = new List<string>();
+            if (train.TryGetValue("losses", out v) && v is object[])
+            {
+                var arr = (object[])v;
+                for (int i = Math.Max(0, arr.Length - tail); i < arr.Length; i++)
+                    parts.Add("eval_loss " + Convert.ToString(arr[i], CultureInfo.InvariantCulture));
+            }
+            if (parts.Count == 0)
+            {
+                string stage = Str(train, "stage");
+                if (!string.IsNullOrEmpty(stage)) parts.Add("stage " + TrainText(stage));
+                if (train.ContainsKey("elapsed")) parts.Add("elapsed " + Str(train, "elapsed"));
+                if (train.ContainsKey("logAge")) parts.Add("log " + Str(train, "logAge") + " s ago");
+            }
+            return parts.Count == 0 ? "—" : string.Join(Environment.NewLine, parts.ToArray());
         }
 
         Control Abs(Control c, int x, int y)
@@ -2381,17 +2807,17 @@ namespace NexusBoard
                         }
                     }
 
-                    BeginInvoke((Action)(() =>
+                    Ui(() =>
                     {
                         tasks = parsedTasks;
                         sections = parsedSections;
                         lastSync = DateTime.Now;
                         Render();
-                    }));
+                    });
                 }
                 catch
                 {
-                    BeginInvoke((Action)(() => lblSub.Text = L.T("offline")));
+                    Ui(() => lblSub.Text = L.T("offline"));
                 }
                 finally { Interlocked.Exchange(ref boardBusy, 0); }
             });
@@ -2417,20 +2843,29 @@ namespace NexusBoard
 
         void EditTask(TaskItem t)
         {
+            if (string.IsNullOrEmpty(boardId)) return;
             using (var dlg = new TaskDialog(api, boardId, th, sections, t))
             {
-                if (dlg.ShowDialog(this) == DialogResult.OK) LoadBoard();
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                if (dlg.Deleted)
+                {
+                    string gone = dlg.DeletedId;
+                    if (!string.IsNullOrEmpty(gone)) tasks.RemoveAll(x => x.Id == gone);
+                    Render();
+                }
+                LoadBoard();
             }
         }
 
         void NewSection()
         {
+            if (string.IsNullOrEmpty(boardId)) return;
             string name = Prompt.Show(this, L.T("newsect"), L.T("sectname"), th);
             if (string.IsNullOrEmpty(name)) return;
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 try { api.AddSection(boardId, name); } catch { }
-                BeginInvoke((Action)LoadBoard);
+                Ui(LoadBoard);
             });
         }
 
@@ -2452,9 +2887,8 @@ namespace NexusBoard
             if (!string.IsNullOrEmpty(lang))
             {
                 L.Lang = lang == "en" ? "en" : "ru";
-                settings.Lang = L.Lang;
             }
-            settings.Save();
+            // --shot — только снимок: theme/lang в settings.json не пишем, чтобы не затереть выбор владельца
             ApplyTheme();
             if (chatView) { Render(); LoadChat(true); }
             else if (viewsView) { Render(); LoadViews(); }
@@ -2484,12 +2918,13 @@ namespace NexusBoard
             using (var dlg = new KeyDialog(th, boardId))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                string key = dlg.Key;
-                if (key.Length != 16)
+                string key = (dlg.Key ?? "").Trim().ToLowerInvariant();
+                if (!IsBoardKey(key))
                 {
                     MessageBox.Show(this, L.Lang == "en"
-                        ? "A board key is 16 characters: 0-9, a-f."
-                        : "Ключ доски — 16 символов: 0-9, a-f.", "Nexus Board");
+                        ? "Board key must be 16 hex characters: 0-9, a-f."
+                        : "Ключ доски — 16 hex-символов: 0-9, a-f.", "Nexus Board",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
                 settings.Board = key;
@@ -2498,9 +2933,27 @@ namespace NexusBoard
                 tasks.Clear();
                 sections.Clear();
                 activeSection = "";
+                // чужая доска не должна оставлять свои сообщения и позицию опроса
+                chatMsgs.Clear();
+                chatLast = 0;
+                chatReloadPending = false;
+                blocks.Clear();
+                ClearControls(list);
                 Render();
                 LoadBoard();
+                if (chatView) LoadChat(true);
             }
+        }
+
+        internal static bool IsBoardKey(string key)
+        {
+            if (string.IsNullOrEmpty(key) || key.Length != 16) return false;
+            for (int i = 0; i < key.Length; i++)
+            {
+                char c = key[i];
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            }
+            return true;
         }
 
         void OpenSettings()
@@ -2520,114 +2973,228 @@ namespace NexusBoard
             }
         }
 
+        static int[] VerParts(string v)
+        {
+            if (string.IsNullOrEmpty(v)) return new int[0];
+            var parts = new List<int>();
+            var sb = new StringBuilder();
+            for (int i = 0; i <= v.Length; i++)
+            {
+                char c = i < v.Length ? v[i] : '.';
+                if (c >= '0' && c <= '9') sb.Append(c);
+                else
+                {
+                    if (sb.Length == 0) continue;
+                    int n;
+                    if (!int.TryParse(sb.ToString(), out n)) n = 0;
+                    parts.Add(n);
+                    sb.Length = 0;
+                }
+            }
+            return parts.ToArray();
+        }
+
+        /// <summary>true только если серверная версия строго новее локальной — никаких откатов.</summary>
+        static bool IsNewerVersion(string remote)
+        {
+            var r = VerParts(remote);
+            if (r.Length == 0) return false;
+            var l = VerParts(Program.Version);
+            int n = Math.Max(r.Length, l.Length);
+            for (int i = 0; i < n; i++)
+            {
+                int a = i < r.Length ? r[i] : 0;
+                int b = i < l.Length ? l[i] : 0;
+                if (a != b) return a > b;
+            }
+            return false;
+        }
+
+        void SetUpdateAvailable(bool show, string tip)
+        {
+            if (btnUpdate == null) return;
+            btnUpdate.Visible = show;
+            if (tipUpdate == null) tipUpdate = new ToolTip();
+            tipUpdate.SetToolTip(btnUpdate, tip ?? "");
+            LayoutHeader();
+        }
+
         void CheckUpdate()
         {
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                string raw = api.CheckUpdate();
+                string raw;
+                try { raw = api.CheckUpdate(); }
+                catch { return; }
                 if (string.IsNullOrEmpty(raw)) return;
-                try
+                Dictionary<string, object> d;
+                try { d = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>; }
+                catch { return; }
+                if (d == null) return;
+
+                string ver = d.ContainsKey("versionName") ? Convert.ToString(d["versionName"]) : "";
+                int code = d.ContainsKey("versionCode") ? (int)Num(d, "versionCode") : 0;
+                string file = d.ContainsKey("file") ? Convert.ToString(d["file"]) : "";
+                string sha = d.ContainsKey("sha256") ? Convert.ToString(d["sha256"]) : "";
+
+                bool newer = IsNewerVersion(ver);
+                if (!newer && VerParts(ver).Length == 0) newer = code > Program.VersionCode;
+
+                Ui(() =>
                 {
-                    var d = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
-                    if (d == null) return;
-                    string ver = d.ContainsKey("versionName") ? Convert.ToString(d["versionName"]) : "";
-                    if (ver != Program.Version && !string.IsNullOrEmpty(ver))
+                    if (!newer)
                     {
-                        updateVersion = ver;
-                        bool already = settings.AutoUpdatedTo == ver;
-                        BeginInvoke((Action)(() =>
-                        {
-                            btnUpdate.Visible = true;
-                            btnUpdate.Text = "↓";
-                            LayoutHeader();
-                            var tip = new ToolTip();
-                            tip.SetToolTip(btnUpdate, L.T("update") + " " + ver);
-                            if (!already)
-                            {
-                                settings.AutoUpdatedTo = ver;
-                                settings.Save();
-                                AutoInstallUpdate();
-                            }
-                        }));
+                        updateVersion = "";
+                        updateFile = "";
+                        updateSha = "";
+                        updateCode = 0;
+                        SetUpdateAvailable(false, "");
+                        return;
                     }
-                }
-                catch { }
+                    updateVersion = ver;
+                    updateFile = file;
+                    updateSha = sha;
+                    updateCode = code;
+                    SetUpdateAvailable(true, L.T("update") + " " + ver);
+                });
             });
         }
 
+        /// <summary>Скачивание в память + сверка SHA-256. Установка — только после «Да» в диалоге.</summary>
         void AutoInstallUpdate()
         {
+            string ver = updateVersion, file = updateFile, sha = updateSha;
+            string baseUrl = (settings.Base ?? "").TrimEnd('/');
+            if (string.IsNullOrEmpty(ver)) return;
+            if (string.IsNullOrEmpty((sha ?? "").Trim()))
+            {
+                MessageBox.Show(this,
+                    L.Lang == "en"
+                        ? "The manifest has no checksum — refusing to install the update."
+                        : "В манифесте нет контрольной суммы — не ставлю обновление.",
+                    "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (string.IsNullOrEmpty(file)) file = "pc/NexusBoard.exe";
+            string url = baseUrl + "/app/" + file.TrimStart('/');
+
+            SetUpdateAvailable(true, L.T("update") + " " + ver);
+            lblSub.Text = (L.Lang == "en" ? "downloading " : "скачиваю ") + ver + "…";
+
             ThreadPool.QueueUserWorkItem(_ =>
             {
-                string tmp = Path.Combine(Path.GetTempPath(), "NexusBoard-new.exe");
+                string tmp = Path.Combine(Path.GetTempPath(), "NexusBoard-" + ver + ".exe");
+                string error = "";
                 try
                 {
-                    try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
-                    using (var wc = new WebClient()) wc.DownloadFile(settings.Base.TrimEnd('/') + "/app/pc/NexusBoard.exe", tmp);
-                    var info = new FileInfo(tmp);
-                    if (!info.Exists || info.Length < 20000) return;
-                    try
+                    byte[] data;
+                    using (var wc = new TimeoutWebClient { TimeoutMs = 180000 })
                     {
-                        BeginInvoke((Action)(() => { lblSub.Text = (L.Lang == "en" ? "updating… " : "обновляюсь… "); }));
+                        wc.Headers.Add("User-Agent", "NexusBoardPC/" + Program.Version);
+                        data = wc.DownloadData(url);
                     }
-                    catch { }
-                    System.Diagnostics.Process.Start(tmp, Program.UpdateArg + " \"" + Application.ExecutablePath + "\"");
-                    try { BeginInvoke((Action)(() => Close())); } catch { }
+                    if (data == null || data.Length < 20000)
+                    {
+                        error = L.Lang == "en" ? "downloaded file looks broken" : "скачался битый файл";
+                    }
+                    else
+                    {
+                        string got;
+                        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                            got = BitConverter.ToString(sha256.ComputeHash(data)).Replace("-", "").ToLowerInvariant();
+                        string want = sha.Trim().ToLowerInvariant();
+                        bool match = got == want || got.StartsWith(want) || want.StartsWith(got);
+                        if (!match)
+                        {
+                            error = L.Lang == "en"
+                                ? "Checksum mismatch — update cancelled."
+                                : "Контрольная сумма не совпала — обновление отменено.";
+                        }
+                        else
+                        {
+                            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                            File.WriteAllBytes(tmp, data);
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex) { error = ex.Message; }
+
+                if (!string.IsNullOrEmpty(error))
                 {
-                    // сеть/антивирус — тихо оставляем текущую версию, кнопка ↓ остаётся
+                    Ui(() =>
+                    {
+                        lblSub.Text = L.T("offline");
+                        MessageBox.Show(this, error, L.T("err"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    });
+                    return;
                 }
+                Ui(() => AskInstall(tmp, ver));
             });
+        }
+
+        void AskInstall(string file, string ver)
+        {
+            if (closing) return;
+            string q = L.Lang == "en"
+                ? "Update " + ver + " is downloaded. Install it now? The app will restart."
+                : "Скачано обновление " + ver + ", установить сейчас? Приложение перезапустится.";
+            if (MessageBox.Show(this, q, "Nexus Board", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                lblSub.Text = (L.Lang == "en" ? "update " : "обновление ") + ver +
+                    (L.Lang == "en" ? " is ready — press ↓" : " готово — нажми ↓");
+                return;
+            }
+            try
+            {
+                System.Diagnostics.Process.Start(file, Program.UpdateArg + " \"" + Application.ExecutablePath + "\"");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, L.T("err"));
+                return;
+            }
+            Close();
         }
 
         void Click_Update(object s, EventArgs e)
         {
             if (string.IsNullOrEmpty(updateVersion))
             {
+                lblSub.Text = L.Lang == "en" ? "checking for updates…" : "проверяю обновления…";
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    string raw = api.CheckUpdate();
-                    string fresh = "";
-                    try
-                    {
-                        var d = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
-                        if (d != null && d.ContainsKey("versionName")) fresh = Convert.ToString(d["versionName"]);
-                    }
+                    string raw = "";
+                    try { raw = api.CheckUpdate(); } catch { }
+                    Dictionary<string, object> d = null;
+                    try { d = new JavaScriptSerializer().DeserializeObject(raw ?? "") as Dictionary<string, object>; }
                     catch { }
-                    try
+                    string fresh = d != null && d.ContainsKey("versionName") ? Convert.ToString(d["versionName"]) : "";
+                    int code = d != null && d.ContainsKey("versionCode") ? (int)Num(d, "versionCode") : 0;
+                    string file = d != null && d.ContainsKey("file") ? Convert.ToString(d["file"]) : "";
+                    string sha = d != null && d.ContainsKey("sha256") ? Convert.ToString(d["sha256"]) : "";
+                    bool newer = IsNewerVersion(fresh);
+                    Ui(() =>
                     {
-                        BeginInvoke((Action)(() =>
+                        if (newer)
                         {
-                            if (!string.IsNullOrEmpty(fresh) && fresh != Program.Version)
-                            {
-                                updateVersion = fresh;
-                                lblSub.Text = (L.Lang == "en" ? "new version " : "новая версия ") + fresh;
-                                AutoInstallUpdate();
-                            }
-                            else
-                            {
-                                lblSub.Text = L.Lang == "en" ? "latest version installed" : "установлена последняя версия";
-                            }
-                        }));
-                    }
-                    catch { }
+                            updateVersion = fresh;
+                            updateFile = file;
+                            updateSha = sha;
+                            updateCode = code;
+                            lblSub.Text = (L.Lang == "en" ? "new version " : "новая версия ") + fresh;
+                            SetUpdateAvailable(true, L.T("update") + " " + fresh);
+                            AutoInstallUpdate();
+                        }
+                        else
+                        {
+                            SetUpdateAvailable(false, "");
+                            lblSub.Text = L.Lang == "en" ? "latest version installed" : "установлена последняя версия";
+                        }
+                    });
                 });
                 return;
             }
-            try
-            {
-                string url = settings.Base.TrimEnd('/') + "/app/pc/NexusBoard.exe";
-                string tmp = Path.Combine(Path.GetTempPath(), "NexusBoard-new.exe");
-                using (var wc = new WebClient()) wc.DownloadFile(url, tmp);
-                string self = Application.ExecutablePath;
-                System.Diagnostics.Process.Start(tmp, Program.UpdateArg + " \"" + self + "\"");
-                Close();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, L.T("err"));
-            }
+            AutoInstallUpdate();
         }
     }
 
@@ -2705,9 +3272,13 @@ namespace NexusBoard
 
         TextBox txtTitle, txtNote, txtProgress;
         ComboBox cbSection, cbStatus;
+        FlatButton okBtn;
         bool deleted;
+        string deletedId = "";
 
         public bool Deleted { get { return deleted; } }
+
+        public string DeletedId { get { return deletedId; } }
 
         public TaskDialog(Api api, string boardId, Theme th, List<SectionItem> sections, TaskItem task)
         {
@@ -2741,13 +3312,29 @@ namespace NexusBoard
             AddLabel(L.T("section"), 20, y);
             AddLabel(L.T("status"), 300, y);
             y += 22;
-            cbSection = new ComboBox { Location = new Point(20, y), Width = 250, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            cbSection = new ComboBox
+            {
+                Location = new Point(20, y),
+                Width = 250,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = th.Card,
+                ForeColor = th.Text
+            };
             cbSection.Items.Add("—");
             foreach (var s in sections) cbSection.Items.Add(s.Name);
             cbSection.SelectedIndex = 0;
             Controls.Add(cbSection);
 
-            cbStatus = new ComboBox { Location = new Point(300, y), Width = 220, DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat };
+            cbStatus = new ComboBox
+            {
+                Location = new Point(300, y),
+                Width = 220,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = th.Card,
+                ForeColor = th.Text
+            };
             cbStatus.Items.Add(L.T("todo"));
             cbStatus.Items.Add(L.T("doing"));
             cbStatus.Items.Add(L.T("blocked"));
@@ -2760,9 +3347,9 @@ namespace NexusBoard
             txtProgress = AddBox(20, y, 90);
             txtProgress.Text = "0";
 
-            var ok = new FlatButton { Text = L.T("save"), Location = new Point(380, y - 6), Size = new Size(120, 36), BackColor = th.Accent, ForeColor = th.AccentText };
-            ok.Click += (snd, e) => Save();
-            Controls.Add(ok);
+            okBtn = new FlatButton { Text = L.T("save"), Location = new Point(380, y - 6), Size = new Size(120, 36), BackColor = th.Accent, ForeColor = th.AccentText };
+            okBtn.Click += (snd, e) => Save();
+            Controls.Add(okBtn);
 
             var cancel = new FlatButton { Text = L.T("cancel"), Location = new Point(506, y - 6), Size = new Size(74, 36), BackColor = th.Card, ForeColor = th.Text };
             cancel.Click += (snd, e) => { DialogResult = DialogResult.Cancel; Close(); };
@@ -2780,10 +3367,42 @@ namespace NexusBoard
                 var del = new FlatButton { Text = L.T("delete"), Location = new Point(20, y - 6), Size = new Size(110, 36), BackColor = th.Card, ForeColor = Color.FromArgb(220, 90, 90) };
                 del.Click += (s, e) =>
                 {
-                    try { api.UpdateTask(boardId, task.Id, new Dictionary<string, object> { { "status", "done" }, { "progress", 100 } }); } catch { }
-                    deleted = true;
-                    DialogResult = DialogResult.OK;
-                    Close();
+                    string ask = L.Lang == "en" ? "Delete this task?" : "Удалить задачу?";
+                    if (MessageBox.Show(this, ask, "Nexus Board", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                    del.Enabled = false;
+                    string id = task.Id;
+                    ThreadPool.QueueUserWorkItem(_ =>
+                    {
+                        int code;
+                        try { code = api.DeleteTask(boardId, id); }
+                        catch { code = 0; }
+                        try
+                        {
+                            if (IsDisposed) return;
+                            BeginInvoke((Action)(() =>
+                            {
+                                del.Enabled = true;
+                                if (code == 200)
+                                {
+                                    deleted = true;
+                                    deletedId = id;
+                                    DialogResult = DialogResult.OK;
+                                    Close();
+                                    return;
+                                }
+                                if (code == 404)
+                                {
+                                    MessageBox.Show(this,
+                                        L.Lang == "en" ? "Server does not support delete — update the server." : "Сервер не поддерживает удаление — обнови сервер.",
+                                        "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    return;
+                                }
+                                MessageBox.Show(this,
+                                    L.Lang == "en" ? "Delete failed." : "Удалить не получилось.", L.T("err"));
+                            }));
+                        }
+                        catch { }
+                    });
                 };
                 Controls.Add(del);
             }
@@ -2813,26 +3432,46 @@ namespace NexusBoard
             string status = keys[Math.Max(0, cbStatus.SelectedIndex)];
             string section = cbSection.SelectedIndex > 0 && cbSection.SelectedIndex - 1 < sections.Count ? sections[cbSection.SelectedIndex - 1].Id : "";
 
-            try
+            bool isNew = task == null;
+            string id = isNew ? "" : task.Id;
+            if (okBtn != null) okBtn.Enabled = false;
+
+            ThreadPool.QueueUserWorkItem(_ =>
             {
-                if (task == null)
+                string err = "";
+                try
                 {
-                    api.AddTask(boardId, title, note, section, status, prog);
-                }
-                else
-                {
-                    api.UpdateTask(boardId, task.Id, new Dictionary<string, object>
+                    if (isNew)
                     {
-                        { "title", title }, { "note", note }, { "status", status }, { "progress", prog }, { "section", section }
-                    });
+                        api.AddTask(boardId, title, note, section, status, prog);
+                    }
+                    else
+                    {
+                        api.UpdateTask(boardId, id, new Dictionary<string, object>
+                        {
+                            { "title", title }, { "note", note }, { "status", status }, { "progress", prog }, { "section", section }
+                        });
+                    }
                 }
-                DialogResult = DialogResult.OK;
-                Close();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, ex.Message, L.T("err"));
-            }
+                catch (Exception ex) { err = ex.Message; }
+
+                try
+                {
+                    if (IsDisposed) return;
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (okBtn != null) okBtn.Enabled = true;
+                        if (string.IsNullOrEmpty(err))
+                        {
+                            DialogResult = DialogResult.OK;
+                            Close();
+                            return;
+                        }
+                        MessageBox.Show(this, err, L.T("err"));
+                    }));
+                }
+                catch { }
+            });
         }
     }
 
@@ -2983,25 +3622,60 @@ namespace NexusBoard
             var fresh = new FlatButton { Text = L.T("newboard"), Location = new Point(20, y), Size = new Size(230, 34), BackColor = th.Card, ForeColor = th.Text };
             fresh.Click += (snd, e) =>
             {
-                try
+                string baseUrl = NormalizeBase(url.Text);
+                if (baseUrl == null)
                 {
-                    var api = new Api(url.Text.Trim());
-                    string id = api.NewBoard();
-                    if (!string.IsNullOrEmpty(id)) key.Text = id;
+                    MessageBox.Show(this, BadUrlText(), "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
                 }
-                catch (Exception ex)
+                fresh.Enabled = false;
+                ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    MessageBox.Show(this, ex.Message, L.T("err"));
-                }
+                    string id = "";
+                    string err = "";
+                    try { id = new Api(baseUrl).NewBoard(); }
+                    catch (Exception ex) { err = ex.Message; }
+                    try
+                    {
+                        if (IsDisposed) return;
+                        BeginInvoke((Action)(() =>
+                        {
+                            fresh.Enabled = true;
+                            if (!string.IsNullOrEmpty(id))
+                            {
+                                url.Text = baseUrl;
+                                key.Text = id;
+                                return;
+                            }
+                            MessageBox.Show(this, string.IsNullOrEmpty(err) ? L.T("offline") : err, L.T("err"));
+                        }));
+                    }
+                    catch { }
+                });
             };
             Controls.Add(fresh);
 
             var save = new FlatButton { Text = L.T("save"), Location = new Point(420, 370), Size = new Size(180, 38), BackColor = th.Accent, ForeColor = th.AccentText };
             save.Click += (snd, e) =>
             {
-                settings.Base = url.Text.Trim();
-                settings.Board = key.Text.Trim();
-                settings.Key = nkey.Text.Trim();
+                string baseUrl = NormalizeBase(url.Text);
+                if (baseUrl == null)
+                {
+                    MessageBox.Show(this, BadUrlText(), "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                string board = (key.Text ?? "").Trim().ToLowerInvariant();
+                if (board.Length > 0 && !MainForm.IsBoardKey(board))
+                {
+                    MessageBox.Show(this, L.Lang == "en"
+                        ? "Board key must be 16 hex characters: 0-9, a-f."
+                        : "Ключ доски — 16 hex-символов: 0-9, a-f.",
+                        "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                settings.Base = baseUrl;
+                settings.Board = board;
+                settings.Key = (nkey.Text ?? "").Trim();
                 settings.Save();
                 BoardId = settings.Board;
                 DialogResult = DialogResult.OK;
@@ -3012,6 +3686,27 @@ namespace NexusBoard
             var close = new FlatButton { Text = L.T("cancel"), Location = new Point(310, 370), Size = new Size(100, 38), BackColor = th.Card, ForeColor = th.Text };
             close.Click += (snd, e) => { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(close);
+        }
+
+        static string BadUrlText()
+        {
+            return L.Lang == "en"
+                ? "Server URL must be http:// or https:// without spaces, e.g. https://board.example.ru"
+                : "Адрес сервера — http:// или https:// без пробелов, например https://board.example.ru";
+        }
+
+        /// <summary>Возвращает нормализованный адрес без хвостового слэша или null, если он неверный.</summary>
+        internal static string NormalizeBase(string raw)
+        {
+            string v = (raw ?? "").Trim();
+            if (v.Length == 0) return null;
+            if (v.IndexOf(' ') >= 0 || v.IndexOf('\t') >= 0 || v.IndexOf('\n') >= 0) return null;
+            if (v.IndexOf("://", StringComparison.Ordinal) < 0) v = "https://" + v;
+            Uri uri;
+            if (!Uri.TryCreate(v, UriKind.Absolute, out uri)) return null;
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return null;
+            if (string.IsNullOrEmpty(uri.Host)) return null;
+            return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
         }
     }
 

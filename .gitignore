@@ -1,5 +1,7 @@
 data/
 server/boards/
+server/chat/
+server/hw/
 server/logs/
 server/token.txt
 server/*.log
@@ -15,3 +17,11 @@ node_modules/
 build/
 app/build/
 local.properties
+*.png.ok
+keystore.properties
+*.jks
+*.keystore
+keystore.properties
+*.jks
+*.keystore
+/app/release/

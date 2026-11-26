@@ -3,9 +3,15 @@ package ru.nexus.board;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import org.json.JSONObject;
+
 public final class Prefs {
 
     public static final String DEFAULT_BASE = "https://board.nexus-your-heper.ru";
+
+    /** Один запрос на создание доски на весь процесс: экраны не плодят доски. */
+    private static final Object BOARD_LOCK = new Object();
+
     private final SharedPreferences sp;
 
     public Prefs(Context c) {
@@ -51,13 +57,17 @@ public final class Prefs {
         sp.edit().putString("lang", v).apply();
     }
 
-
     public String boardId() {
-        return sp.getString("boardId", "");
+        String v = sp.getString("boardId", "");
+        return v == null ? "" : v.trim();
     }
 
     public void boardId(String v) {
         sp.edit().putString("boardId", v == null ? "" : v.trim()).apply();
+    }
+
+    public void clearBoard() {
+        sp.edit().remove("boardId").apply();
     }
 
     public boolean nexusMode() {
@@ -86,5 +96,65 @@ public final class Prefs {
 
     public void lastUpdateCheck(long v) {
         sp.edit().putLong("updCheck", v).apply();
+    }
+
+    // ---------- отложенное обновление ----------
+
+    public String updFile() {
+        return sp.getString("updFile", "");
+    }
+
+    public String updName() {
+        return sp.getString("updName", "");
+    }
+
+    public String updNotes() {
+        return sp.getString("updNotes", "");
+    }
+
+    public String updSha() {
+        return sp.getString("updSha", "");
+    }
+
+    public void update(String file, String name, String notes, String sha) {
+        sp.edit()
+                .putString("updFile", file == null ? "" : file)
+                .putString("updName", name == null ? "" : name)
+                .putString("updNotes", notes == null ? "" : notes)
+                .putString("updSha", sha == null ? "" : sha)
+                .apply();
+    }
+
+    public void clearUpdate() {
+        sp.edit().remove("updFile").remove("updName").remove("updNotes").remove("updSha").apply();
+    }
+
+    /**
+     * Возвращает ключ доски, создавая её при необходимости. Блокирующий вызов:
+     * дергать только из фонового потока. Повторные вызовы из разных экранов
+     * ждут один и тот же запрос и получают тот же ключ.
+     */
+    public static String ensureBoard(Context c) {
+        Prefs p = new Prefs(c);
+        String id = p.boardId();
+        if (validBoardId(id)) return id;
+        synchronized (BOARD_LOCK) {
+            id = p.boardId();
+            if (validBoardId(id)) return id;
+            try {
+                JSONObject o = Api.postJson(p.base() + "/api/b/new", "", "{}");
+                String fresh = o.optString("id", "").trim().toLowerCase(java.util.Locale.ROOT);
+                if (validBoardId(fresh)) {
+                    p.boardId(fresh);
+                    return fresh;
+                }
+            } catch (Exception ignored) {
+            }
+            return "";
+        }
+    }
+
+    public static boolean validBoardId(String id) {
+        return id != null && id.matches("^[a-f0-9]{16}$");
     }
 }
