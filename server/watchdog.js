@@ -19,6 +19,12 @@ const CF_CONFIG = process.env.NEXUS_CF_CONFIG || path.join(os.homedir(), ".cloud
 function log(line) {
   const row = `[${new Date().toISOString()}] ${String(line).replace(/[\r\n]+/g, " ")}\n`;
   try {
+    if (fs.statSync(LOG).size > 2 * 1024 * 1024) {
+      try { fs.unlinkSync(LOG + ".1"); } catch {}
+      try { fs.renameSync(LOG, LOG + ".1"); } catch {}
+    }
+  } catch {}
+  try {
     fs.appendFileSync(LOG, row);
   } catch {}
   process.stdout.write(row);

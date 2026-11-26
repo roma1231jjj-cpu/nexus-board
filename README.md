@@ -32,7 +32,7 @@ Windows 10/11 и .NET Framework 4.8 (в Windows 10/11 уже есть). Кноп
 
 ## Телефон
 
-Android 13+ (`minSdk 33`). Доска и обучение обновляются каждые 10 секунд, пока приложение открыто; обновление APK предлагается вручную и проверяется по SHA-256.
+Android 7+ (`minSdk 24`). Доска и обучение обновляются каждые 10 секунд, пока приложение открыто; обновление APK предлагается вручную и проверяется по SHA-256.
 
 ## Что умеет
 
@@ -138,7 +138,7 @@ NexusBoard.exe --code-pull <id> [--out E:\patch.diff]
 
 Windows 10/11 with .NET Framework 4.8 (already present). The update button appears only when a newer build exists, and the downloaded file is checked against SHA-256.
 
-Android 13+ (`minSdk 33`). The board refreshes every 10 seconds while the app is open; APK updates are offered manually and checked against SHA-256.
+Android 7+ (`minSdk 24`). The board refreshes every 10 seconds while the app is open; APK updates are offered manually and checked against SHA-256.
 
 Features: section tabs (Training, Sales, Home — created by your AI or with “+ Section”), Now / Next / Waiting / Done columns with notes and progress, three named themes (Midnight, Frost, Graphite), Russian and English UI with an instant switch, a Connection screen with copyable keys, and one-click update on both platforms.
 

@@ -280,8 +280,9 @@ function vCard(b){
   }
   if (b.kind === "links"){
     const items = Array.isArray(body.items) ? body.items : [];
+    const href = u => /^https?:\/\//i.test(String(u || "")) ? vEsc(u) : "#";
     return `<div class="vcard">${head}${items.map(it =>
-      `<a class="vlink" href="${vEsc(it.url)}" target="_blank" rel="noopener">${vEsc(it.label)}${it.note ? " · " + vEsc(it.note) : ""}</a>`).join("")}</div>`;
+      `<a class="vlink" href="${href(it.url)}" target="_blank" rel="noopener">${vEsc(it.label)}${it.note ? " · " + vEsc(it.note) : ""}</a>`).join("")}</div>`;
   }
   if (b.kind === "code"){
     return `<div class="vcard">${head}<div class="vsub">${vEsc(body.filename)} · v${vEsc(body.version)}</div>

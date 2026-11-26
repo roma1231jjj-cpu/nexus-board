@@ -1,3 +1,5 @@
+Set fso = CreateObject("Scripting.FileSystemObject")
+base = fso.GetParentFolderName(fso.GetParentFolderName(WScript.ScriptFullName))
 Set sh = CreateObject("WScript.Shell")
-sh.CurrentDirectory = "E:\Nexus-Board"
-sh.Run "node ""E:\Nexus-Board\server\server.js""", 0, False
+sh.CurrentDirectory = base
+sh.Run "node """ & base & "\server\server.js""", 0, False

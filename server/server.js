@@ -176,11 +176,14 @@ const rateBuckets = new Map();
 const newBoards = new Map();
 
 function clientIp(req) {
-  // CF-Connecting-IP ставит Cloudflare сам: X-Forwarded-For клиент может подделать
+  const remote = String((req.socket && req.socket.remoteAddress) || "?").replace(/^::ffff:/, "");
+  // Заголовкам верим только от локального cloudflared/прокси: иначе клиент
+  // подставляет CF-Connecting-IP/X-Forwarded-For и обходит лимит запросов.
+  const local = remote === "127.0.0.1" || remote === "::1" || remote === "localhost";
+  if (!local) return remote.slice(0, 64) || "?";
   const cf = String(req.headers["cf-connecting-ip"] || "").trim();
   const fwd = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  const raw = cf || fwd || (req.socket && req.socket.remoteAddress) || "?";
-  return raw.replace(/^::ffff:/, "").slice(0, 64) || "?";
+  return (cf || fwd || remote).replace(/^::ffff:/, "").slice(0, 64) || "?";
 }
 
 // скользящее окно по секундам: массив меток времени на пару bucket|ip

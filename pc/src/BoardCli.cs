@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -142,17 +143,47 @@ namespace NexusBoard.Cli
             return b;
         }
 
-        static void Quarantine(string file, Exception ex)
+        static string ExistingQuarantine(string file)
         {
-            string bad = file + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
             try
             {
-                File.Copy(file, bad, true);
+                string dir = Path.GetDirectoryName(file);
+                string name = Path.GetFileName(file);
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
+                string hash;
+                using (var sha = SHA256.Create())
+                    hash = Convert.ToBase64String(sha.ComputeHash(File.ReadAllBytes(file)));
+                foreach (string candidate in Directory.GetFiles(dir, name + ".bad-*"))
+                {
+                    try
+                    {
+                        string other;
+                        using (var sha = SHA256.Create())
+                            other = Convert.ToBase64String(sha.ComputeHash(File.ReadAllBytes(candidate)));
+                        if (other == hash) return candidate;
+                    }
+                    catch (Exception) { }
+                }
             }
-            catch (Exception copy)
+            catch (Exception) { }
+            return null;
+        }
+
+        static void Quarantine(string file, Exception ex)
+        {
+            string bad = ExistingQuarantine(file);
+            if (bad == null)
             {
-                throw new IOException("tasks.json повреждён (" + ex.Message +
-                    "), копию сделать не удалось: " + copy.Message + "; файл не изменён", copy);
+                bad = file + ".bad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                try
+                {
+                    File.Copy(file, bad, true);
+                }
+                catch (Exception copy)
+                {
+                    throw new IOException("tasks.json повреждён (" + ex.Message +
+                        "), копию сделать не удалось: " + copy.Message + "; файл не изменён", copy);
+                }
             }
             try
             {
@@ -1843,6 +1874,7 @@ namespace NexusBoard.Cli
                 string broken = Path.Combine(dir, "broken.json");
                 File.WriteAllText(broken, "{\"tasks\": [ {\"id\": ", new UTF8Encoding(false));
                 Board empty = Store.LoadFrom(broken);
+                Store.LoadFrom(broken);
                 string[] bads = Directory.GetFiles(dir, "broken.json.bad-*");
                 if (empty == null || empty.Tasks.Count != 0 || bads.Length != 1 || !File.Exists(broken))
                 {

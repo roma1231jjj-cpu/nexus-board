@@ -32,7 +32,7 @@ Windows 10/11 and .NET Framework 4.8 (already present in Windows 10/11). When a 
 
 ## Phone
 
-Android 13+ (minSdk 33). APK updates are offered manually and checked with SHA-256; the board and training screens refresh every 10 seconds while the app is open.
+Android 7+ (minSdk 24). APK updates are offered manually and checked with SHA-256; the board and training screens refresh every 10 seconds while the app is open.
 
 ## What it does
 
@@ -101,7 +101,7 @@ NexusBoard.exe --chat-say "reply"
 
 ## Build from source
 
-- Android: `gradle assembleRelease` (Gradle 8.10, minSdk 24), APK in `app/build/outputs/apk/release/`.
+- Android: `.\gradlew assembleRelease` (Gradle 8.7, minSdk 24), APK in `app/build/outputs/apk/release/`.
 - PC: `pc\build.cmd` (csc from .NET Framework 4.8), installer: `pc\setup\build.cmd`.
 - Server: `node server/server.js` (port 8788, key in `server/token.txt`).
 
