@@ -86,6 +86,9 @@ public class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.MsgHolder> {
         h.row.setGravity(m.owner ? Gravity.END : Gravity.START);
         h.bubble.setBackgroundResource(m.owner ? R.drawable.nx_bubble_owner : R.drawable.nx_bubble_ai);
         h.bubble.setAlpha(m.pending ? 0.6f : 1f);
+        if (maxWidth == 0) {
+            maxWidth = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.72f);
+        }
         h.text.setMaxWidth(maxWidth);
         h.text.setText(m.text);
         h.text.setTextColor(NxBackdrop.color(c, m.owner ? R.attr.nxOnPrimary : R.attr.nxText));

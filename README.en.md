@@ -25,7 +25,7 @@ No sign-up, no password, no link to our account: the key is the only thing conne
 | File | What it is |
 |---|---|
 | `NexusBoard.exe` | Portable build, installs nothing |
-| `NexusBoard-portable-2.2.2.zip` | The same plus a README |
+| `NexusBoard-portable.zip` | The same plus a README |
 | `NexusBoard-setup.exe` | Installer: copies to `%LOCALAPPDATA%\NexusBoard`, creates desktop and Start menu shortcuts, adds an entry to “Add or remove programs” |
 
 Windows 10/11 and .NET Framework 4.8 (already present in Windows 10/11). When a new version ships, an update button appears in the header.

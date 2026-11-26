@@ -99,6 +99,9 @@
     <string name="code_pull_confirm">Забрать версию с сервера? Несохранённые правки будут заменены.</string>
     <string name="code_conflict_title">На сервере новая версия</string>
     <string name="code_conflict_body">На компьютере уже версия %1$d. Забери её или оставь свои правки — без твоего выбора ничего не потеряется.</string>
+    <string name="code_exit_title">Закрыть без сохранения?</string>
+    <string name="code_exit_body">В документе есть несохранённые правки. Они пропадут.</string>
+    <string name="code_exit_discard">Закрыть</string>
     <string name="code_conflict_take">Забрать с сервера</string>
     <string name="code_conflict_keep">Оставить мои</string>
 

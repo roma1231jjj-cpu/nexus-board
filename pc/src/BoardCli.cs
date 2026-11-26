@@ -20,6 +20,7 @@ namespace NexusBoard.Cli
         public int Progress { get; set; }
         public int Priority { get; set; }
         public string Source { get; set; }
+        public string Section { get; set; }
         public string Created { get; set; }
         public string Updated { get; set; }
 
@@ -31,6 +32,7 @@ namespace NexusBoard.Cli
             Status = "todo";
             Note = "";
             Source = "ai";
+            Section = "";
             Created = Now();
             Updated = Now();
             Priority = 3;
@@ -189,15 +191,8 @@ namespace NexusBoard.Cli
 
         static string ApiBase()
         {
-            try
-            {
-                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("http://127.0.0.1:8788/api/health");
-                req.Timeout = 600;
-                req.ReadWriteTimeout = 600;
-                using (var r = req.GetResponse()) { }
-                return "http://127.0.0.1:8788";
-            }
-            catch (Exception) { }
+            // никаких проб на localhost: чужой сервис на 8788 получал бы ключ
+            // доски в query string
             var st = NexusBoard.Settings.Load();
             string b = string.IsNullOrEmpty(st.Base) ? "https://board.nexus-your-heper.ru" : st.Base;
             return b.TrimEnd('/');
@@ -1165,8 +1160,10 @@ namespace NexusBoard.Cli
                 }
                 if (ValueFlags.Contains(key))
                 {
+                    // необязательные значения команд (--start --note ...)
+                    // не должны съедать следующий флаг как значение
                     string val = "";
-                    if (i + 1 < args.Length) val = args[++i];
+                    if (i + 1 < args.Length && KeyOf(args[i + 1]) == null) val = args[++i];
                     d[key] = val;
                 }
                 else if (OptionalValueFlags.Contains(key))
@@ -1759,6 +1756,13 @@ namespace NexusBoard.Cli
                 {
                     if (string.IsNullOrEmpty(id) && autoPick) id = Remote.NextId();
                     if (string.IsNullOrEmpty(id)) { Out("ERR укажи id: --" + key + " t3"); return 2; }
+                    if (status == "dropped")
+                    {
+                        // на сервере нет статуса dropped: снятие — это удаление
+                        Remote.Delete(id);
+                        Out("OK " + id + " → dropped");
+                        return 0;
+                    }
                     var fields = new Dictionary<string, object> { { "status", status } };
                     if (to >= 0) fields["progress"] = to > 100 ? 100 : to;
                     if (!string.IsNullOrEmpty(note)) fields["note"] = note;

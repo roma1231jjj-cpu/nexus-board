@@ -23,7 +23,7 @@ const FINETUNE = process.env.NEXUS_FINETUNE_DIR || process.env.NEXUS_FINETUNE ||
 const BOARD_LOG = "board-hits.log";
 const ERROR_LOG = "errors.log";
 const LOG_LIMIT = 5 * 1024 * 1024;
-const MAX_BODY = 64 * 1024;
+const MAX_BODY = 2 * 1024 * 1024;
 const MAX_BOARDS = Number(process.env.NEXUS_MAX_BOARDS || 2000);
 const MAX_CHATS = Number(process.env.NEXUS_MAX_CHATS || 2000);
 const NEW_BOARDS_PER_DAY = 20;
@@ -129,7 +129,12 @@ function cookieValue(req, name) {
   const raw = req.headers.cookie || "";
   for (const part of raw.split(";")) {
     const [k, ...v] = part.trim().split("=");
-    if (k === name) return v.join("=");
+    if (k !== name) continue;
+    try {
+      return decodeURIComponent(v.join("="));
+    } catch {
+      return v.join("=");
+    }
   }
   return "";
 }
@@ -388,6 +393,27 @@ function readTasks() {
 
 const VIEW_KINDS = ["metric", "progress", "status", "text", "log", "links", "chart", "code", "tasks", "activity", "note"];
 
+const LOG_ROOTS = [LOGS, path.join(FINETUNE, "runs", "logs")].map((p) => path.resolve(p));
+
+// kind:"log" — только журналы из разрешённых каталогов. Иначе любой мог
+// прочитать token.txt, boards/*.json или keystore через source.path.
+function safeLogFile(raw) {
+  const p = String(raw || "").trim();
+  if (!p || p.includes("\0")) return null;
+  let full;
+  try {
+    full = path.resolve(p);
+  } catch {
+    return null;
+  }
+  const inside = LOG_ROOTS.some((root) => full === root || full.startsWith(root + path.sep));
+  if (!inside) return null;
+  if (!/\.(log|txt|out|err|jsonl)$/i.test(full)) return null;
+  const base = path.basename(full).toLowerCase();
+  if (/(token|secret|credential|settings|keystore|\.key$|board)/.test(base)) return null;
+  return full;
+}
+
 function tailLines(file, count) {
   let fd = null;
   try {
@@ -427,6 +453,15 @@ function bodySize(o) {
   }
 }
 
+function safeHttpUrl(raw) {
+  try {
+    const u = new URL(String(raw || "").trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 function cleanView(payload, prev) {
   const p = payload && typeof payload === "object" ? payload : {};
   const base = prev || {};
@@ -449,7 +484,6 @@ function cleanView(payload, prev) {
     }
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) body = {};
-  if (bodySize(body) > 65536) body = { text: JSON.stringify(body).slice(0, 60000), truncated: true };
   const size = ["sm", "md", "wide"].includes(String(p.size || base.size)) ? String(p.size || base.size) : "sm";
   const out = {
     id,
@@ -469,12 +503,46 @@ function cleanView(payload, prev) {
       sha: crypto.createHash("sha256").update(content).digest("hex").slice(0, 16),
     };
   } else {
-    out.body = body;
+    // ссылки принимаем только http/https: javascript:, file: и UNC через ПК
+    // открывали бы чужой код или уводили NTLM-хеш
+    if (out.kind === "links") {
+      const items = Array.isArray(body.items) ? body.items : [];
+      out.body = {
+        ...body,
+        items: items
+          .slice(0, 50)
+          .map((it) => {
+            const row = it && typeof it === "object" ? it : {};
+            return {
+              label: String(row.label || "").slice(0, 160),
+              url: safeHttpUrl(row.url),
+              note: String(row.note || "").slice(0, 200),
+            };
+          })
+          .filter((it) => it.url),
+      };
+    } else if (out.kind === "log") {
+      const safe = safeLogFile(body.path);
+      out.body = { ...body };
+      if (safe) out.body.path = safe;
+      else {
+        delete out.body.path;
+        out.body.error = "log path is outside allowed directories";
+      }
+    } else {
+      out.body = body;
+    }
+    if (bodySize(out.body) > 65536) out.body = { text: JSON.stringify(out.body).slice(0, 60000), truncated: true };
   }
   const src = p.source && typeof p.source === "object" ? p.source : base.source;
   if (src && src.path) {
-    out.source = { path: String(src.path).slice(0, 400), lines: Math.max(1, Math.min(400, Number(src.lines) || 40)) };
-    if (out.kind === "log" && !out.body.path) out.body.path = out.source.path;
+    const safe = out.kind === "log" ? safeLogFile(src.path) : null;
+    if (safe) {
+      out.source = { path: safe.slice(0, 400), lines: Math.max(1, Math.min(400, Number(src.lines) || 40)) };
+      if (!out.body.path) out.body.path = safe;
+    } else if (out.kind !== "log") {
+      out.source = { path: String(src.path).slice(0, 400), lines: Math.max(1, Math.min(400, Number(src.lines) || 40)) };
+    }
   }
   if (!out.title) out.title = out.kind;
   return out;
@@ -533,7 +601,9 @@ function boardBlocks(board) {
       const copy = JSON.parse(JSON.stringify(b));
       if (copy.kind === "log") {
         const p = (copy.source && copy.source.path) || (copy.body && copy.body.path);
-        if (p) copy.tail = tailLines(p, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+        const safe = safeLogFile(p);
+        if (safe) copy.tail = tailLines(safe, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+        else copy.tail = { error: "log path is outside allowed directories" };
       }
       return copy;
     })
@@ -944,18 +1014,38 @@ function handle(req, res) {
     const boardKey = String(parsed.searchParams.get("k") || cookieValue(req, "nxt") || "").trim();
 
     if (url === "/api/b/new" && req.method === "POST") {
-      drain(req);
-      if (boardQuotaExceeded(clientIp(req))) {
-        return json(res, 429, { ok: false, error: "too many boards from this ip" });
-      }
-      if (countFiles(BOARDS, ".json") >= MAX_BOARDS) {
-        return json(res, 507, { ok: false, error: "board storage full" });
-      }
-      const id = crypto.randomBytes(8).toString("hex");
-      const fresh = { id, created: new Date().toISOString(), updated: "", tasks: [], sections: [], blocks: [] };
-      if (/^[A-Za-z0-9_-]{8,64}$/.test(boardKey)) fresh.key = boardKey;
-      if (!trySave(res, fresh)) return;
-      return json(res, 200, { ok: true, id });
+      return withBody(req, res, (raw) => {
+        const p = parseJson(raw);
+        if (!p.ok) return json(res, 400, { ok: false, error: "bad json" });
+        let key = String(p.payload.key || "").trim();
+        if (!key) {
+          const q = String(parsed.searchParams.get("k") || "").trim();
+          if (q && !(TOKEN && safeEqual(q, TOKEN))) key = q;
+        }
+        if (!key) {
+          const ck = cookieValue(req, "nxt");
+          if (ck && !(TOKEN && safeEqual(ck, TOKEN))) key = ck;
+        }
+        if (key) {
+          if (!/^[\p{L}\p{N}_-]{8,64}$/u.test(key)) {
+            return json(res, 400, { ok: false, error: "bad key: 8-64 letters, digits, _ or -" });
+          }
+          if (TOKEN && safeEqual(key, TOKEN)) {
+            return json(res, 400, { ok: false, error: "board key must differ from the site token" });
+          }
+        }
+        if (boardQuotaExceeded(clientIp(req))) {
+          return json(res, 429, { ok: false, error: "too many boards from this ip" });
+        }
+        if (countFiles(BOARDS, ".json") >= MAX_BOARDS) {
+          return json(res, 507, { ok: false, error: "board storage full" });
+        }
+        const id = crypto.randomBytes(8).toString("hex");
+        const fresh = { id, created: new Date().toISOString(), updated: "", tasks: [], sections: [], blocks: [] };
+        if (key) fresh.key = key;
+        if (!trySave(res, fresh)) return;
+        return json(res, 200, { ok: true, id });
+      });
     }
 
     if (!validBoardId(bid)) return json(res, 400, { ok: false, error: "bad board id" });
@@ -994,7 +1084,9 @@ function handle(req, res) {
       return json(res, 200, { ok: true, sections: data.sections || [] });
     }
 
-    if (url === "/api/b/activity") {
+    if (url === "/api/b/activity" && req.method === "GET") {
+      const owner = ownerBoard();
+      if (!owner || owner.id !== bid) return json(res, 403, { ok: false, error: "owner board only" });
       try {
         const raw = fs
           .readFileSync(ACT, "utf8")
@@ -1031,7 +1123,9 @@ function handle(req, res) {
         const copy = JSON.parse(JSON.stringify(b));
         if (copy.kind === "log") {
           const p = (copy.source && copy.source.path) || (copy.body && copy.body.path);
-          if (p) copy.tail = tailLines(p, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+          const safe = safeLogFile(p);
+          if (safe) copy.tail = tailLines(safe, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
+          else copy.tail = { error: "log path is outside allowed directories" };
         }
         return copy;
       });
@@ -1088,7 +1182,13 @@ function handle(req, res) {
         return withLock(boardFile(bid), () => {
           const data = loadBoard(bid);
           viewsOf(data);
-          data.tasks = payload.tasks.slice(0, 400).map(syncTask).filter((t) => t.Title);
+          // Слияние, а не замена: CLI с пустым локальным кэшем больше не
+          // стирает задачи, созданные с телефона или сайта.
+          const byId = new Map((data.tasks || []).filter((t) => t && t.Id).map((t) => [t.Id, t]));
+          for (const t of payload.tasks.slice(0, 400).map(syncTask)) {
+            if (t.Title) byId.set(t.Id, { ...(byId.get(t.Id) || {}), ...t });
+          }
+          data.tasks = [...byId.values()];
           if (Array.isArray(payload.sections)) {
             data.sections = payload.sections
               .slice(0, 20)
@@ -1311,8 +1411,10 @@ function handle(req, res) {
             task.Title = title;
           }
           if (payload.note != null) task.Note = String(payload.note).slice(0, 2000);
-          if (payload.status != null && STATUSES.includes(String(payload.status))) {
-            task.Status = String(payload.status);
+          if (payload.status != null) {
+            const status = String(payload.status);
+            if (!STATUSES.includes(status)) return json(res, 400, { ok: false, error: "bad status" });
+            task.Status = status;
           }
           if (payload.mode != null) {
             const mode = String(payload.mode).trim();
@@ -1341,6 +1443,15 @@ function handle(req, res) {
   // ---------- чат доски ----------
   if (isChatApi) {
     const queryId = String(parsed.searchParams.get("board") || "").trim();
+    const chatKey = String(parsed.searchParams.get("k") || cookieValue(req, "nxt") || "").trim();
+    const chatAuthorized = (id) => {
+      try {
+        const b = loadBoard(id);
+        return !b.key || safeEqual(chatKey, b.key);
+      } catch {
+        return false;
+      }
+    };
 
     const loadChat = (id) => {
       try {
@@ -1387,6 +1498,7 @@ function handle(req, res) {
         const text = String(p.payload.text == null ? "" : p.payload.text).trim().slice(0, 4000);
         if (!text) return json(res, 400, { ok: false, error: "text required" });
         if (!fs.existsSync(boardFile(id))) return json(res, 404, { ok: false, error: "board not found" });
+        if (!chatAuthorized(id)) return json(res, 401, { ok: false, error: "bad key" });
         return withLock(path.join(CHAT_DIR, id + ".json"), () => {
           const msg = pushMessage(id, from, text);
           return json(res, 200, { ok: true, id: msg.id, ts: msg.ts });
@@ -1397,6 +1509,7 @@ function handle(req, res) {
     if (url === "/api/c/list" && req.method === "GET") {
       if (!validBoardId(queryId)) return json(res, 400, { ok: false, error: "bad board id" });
       if (!fs.existsSync(boardFile(queryId))) return json(res, 404, { ok: false, error: "board not found" });
+      if (!chatAuthorized(queryId)) return json(res, 401, { ok: false, error: "bad key" });
       const data = loadChat(queryId);
       const since = Number(parsed.searchParams.get("since") || 0) || 0;
       const limit = Math.max(1, Math.min(500, Number(parsed.searchParams.get("limit") || 200) || 200));

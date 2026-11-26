@@ -58,7 +58,7 @@ public class CodeActivity extends AppCompatActivity {
         String extra = safe(getIntent().getStringExtra(EXTRA_TITLE));
         if (!extra.isEmpty()) title.setText(extra);
 
-        findViewById(R.id.code_back).setOnClickListener(v -> finish());
+        findViewById(R.id.code_back).setOnClickListener(v -> confirmExit());
         findViewById(R.id.code_pull).setOnClickListener(v -> pull(true));
         findViewById(R.id.code_save).setOnClickListener(v -> save());
 
@@ -97,6 +97,24 @@ public class CodeActivity extends AppCompatActivity {
 
     private boolean isDirty() {
         return editor != null && !editor.getText().toString().equals(loaded);
+    }
+
+    private void confirmExit() {
+        if (!isDirty()) {
+            finish();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.code_exit_title)
+                .setMessage(R.string.code_exit_body)
+                .setPositiveButton(R.string.code_exit_discard, (d, w) -> finish())
+                .setNegativeButton(R.string.key_cancel, null)
+                .show();
+    }
+
+    @Override
+    public void onBackPressed() {
+        confirmExit();
     }
 
     private void pull(boolean confirm) {

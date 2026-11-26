@@ -74,6 +74,15 @@ public final class Prefs {
         return !key().isEmpty();
     }
 
+    /** Доска открыта личным ключом, а не ключом владельца: тренировка скрыта. */
+    public boolean personal() {
+        return sp.getBoolean("personal", false);
+    }
+
+    public void personal(boolean v) {
+        sp.edit().putBoolean("personal", v).apply();
+    }
+
     public boolean trainTab() {
         return sp.getBoolean("trainTab", false);
     }

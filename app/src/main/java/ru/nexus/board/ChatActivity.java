@@ -74,12 +74,12 @@ public class ChatActivity extends AppCompatActivity {
         findViewById(R.id.btn_send).setOnClickListener(v -> send());
 
         input.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND
-                    || actionId == EditorInfo.IME_ACTION_DONE
-                    || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
                 send();
                 return true;
             }
+            // Enter на физической клавиатуре должен вставлять перевод строки,
+            // а не отправлять недописанное сообщение
             return false;
         });
 

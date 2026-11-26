@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using System.Web.Script.Serialization;
@@ -14,9 +15,9 @@ using System.Web.Script.Serialization;
 [assembly: System.Reflection.AssemblyTitle("Nexus Board")]
 [assembly: System.Reflection.AssemblyProduct("Nexus Board")]
 [assembly: System.Reflection.AssemblyCompany("Nexus x AutSquad")]
-[assembly: System.Reflection.AssemblyFileVersion("2.2.2")]
-[assembly: System.Reflection.AssemblyVersion("2.2.2")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.2.2")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.3")]
+[assembly: System.Reflection.AssemblyVersion("2.2.3")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.2.3")]
 
 namespace NexusBoard
 {
@@ -28,7 +29,7 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.2.2";
+        public const string Version = "2.2.3";
         public const int VersionCode = 19;
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
@@ -1969,7 +1970,14 @@ namespace NexusBoard
                         };
                         link.LinkClicked += (s2, e2) =>
                         {
-                            try { System.Diagnostics.Process.Start(url); } catch { }
+                            try
+                            {
+                                Uri parsed;
+                                if (Uri.TryCreate(url, UriKind.Absolute, out parsed) &&
+                                    (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
+                                    System.Diagnostics.Process.Start(parsed.AbsoluteUri);
+                            }
+                            catch { }
                         };
                         card.Controls.Add(link);
                         y += 28;
@@ -2958,14 +2966,28 @@ namespace NexusBoard
 
         void OpenSettings()
         {
+            string oldBoard = boardId;
             using (var dlg = new SettingsDialog(settings, th, boardId))
             {
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     api = new Api(settings.Base);
+                    api.Key = settings.Key;
                     boardId = settings.Board;
                     th = Theme.Get(settings.Theme);
                     L.Lang = settings.Lang;
+                    if (!string.Equals(oldBoard, boardId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // иначе на экране остаются задачи и чат старой доски
+                        tasks.Clear();
+                        sections.Clear();
+                        blocks.Clear();
+                        chatMsgs.Clear();
+                        chatLast = 0;
+                        activeSection = "";
+                        blocksVersion = "";
+                        feed.Clear();
+                    }
                     BuildMenu();
                     ApplyTheme();
                     if (string.IsNullOrEmpty(boardId)) CreateBoard(); else LoadBoard();
@@ -3103,7 +3125,9 @@ namespace NexusBoard
                         using (var sha256 = System.Security.Cryptography.SHA256.Create())
                             got = BitConverter.ToString(sha256.ComputeHash(data)).Replace("-", "").ToLowerInvariant();
                         string want = sha.Trim().ToLowerInvariant();
-                        bool match = got == want || got.StartsWith(want) || want.StartsWith(got);
+                        // строго 64 hex: короткий префикс из манифеста не должен
+                        // пропускать поддельный exe
+                        bool match = want.Length == 64 && Regex.IsMatch(want, "^[0-9a-f]{64}$") && got == want;
                         if (!match)
                         {
                             error = L.Lang == "en"

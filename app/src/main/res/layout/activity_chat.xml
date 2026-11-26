@@ -118,7 +118,7 @@
                 android:layout_weight="1"
                 android:minHeight="46dp"
                 android:maxLines="4"
-                android:inputType="textCapSentences"
+                android:inputType="textCapSentences|textMultiLine"
                 android:imeOptions="actionSend"
                 android:paddingStart="14dp"
                 android:paddingEnd="14dp"

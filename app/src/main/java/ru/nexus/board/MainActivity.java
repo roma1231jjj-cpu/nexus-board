@@ -302,7 +302,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
     }
 
     private void updateTabs() {
-        boolean nexus = prefs.nexusMode();
+        boolean nexus = prefs.nexusMode() && !prefs.personal();
         boolean board = !prefs.boardId().isEmpty();
         findViewById(R.id.tabs).setVisibility(nexus || board ? View.VISIBLE : View.GONE);
         tabTrain.setVisibility(nexus ? View.VISIBLE : View.GONE);
@@ -436,14 +436,15 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
     private void load() {
         final String key = prefs.key();
         final String base = prefs.base();
-        final boolean nexus = !key.isEmpty();
-        if (!nexus && !Prefs.validBoardId(prefs.boardId())) {
+        final String board = prefs.boardId();
+        final boolean hasBoard = Prefs.validBoardId(board);
+        final boolean nexus = !key.isEmpty() && !prefs.personal();
+        if (!nexus && !hasBoard) {
             status.setText(R.string.connecting);
             ensureBoardAsync();
             return;
         }
         if (loading) return;
-        final String board = prefs.boardId();
         loading = true;
         status.setText(R.string.loading);
         swipe.setRefreshing(true);
@@ -452,16 +453,33 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
             JSONObject train = null;
             String error = null;
             boolean auth = false;
+            boolean ownerTasks = nexus;
+            String boardPath = "/api/b/tasks?b=" + board
+                    + (key.isEmpty() ? "" : "&k=" + Uri.encode(key, "UTF-8"));
             try {
                 tasks = nexus
                         ? Api.json(base, "/api/tasks", key)
-                        : Api.json(base, "/api/b/tasks?b=" + board, "");
+                        : Api.json(base, boardPath, "");
             } catch (Api.AuthException e) {
-                auth = true;
+                // ключ доски не подошёл к /api/tasks: это личная доска,
+                // а не ошибка владельца — пробуем доску тем же ключом
+                if (nexus && hasBoard) {
+                    try {
+                        tasks = Api.json(base, boardPath, "");
+                        ownerTasks = false;
+                        prefs.personal(true);
+                    } catch (Api.AuthException e2) {
+                        auth = true;
+                    } catch (Exception e2) {
+                        error = e2.getMessage();
+                    }
+                } else {
+                    auth = true;
+                }
             } catch (Exception e) {
                 error = e.getMessage();
             }
-            if (nexus) {
+            if (ownerTasks) {
                 try {
                     train = Api.json(base, "/api/train", key);
                 } catch (Api.AuthException e) {
@@ -478,7 +496,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
                 lastFailed = fError != null && fTasks == null && fTrain == null;
                 swipe.setRefreshing(false);
                 updateTabs();
-                if (fAuth) {
+                if (fAuth && fTasks == null) {
                     askKey();
                     return;
                 }
@@ -734,6 +752,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
             boolean fresh = bid.isEmpty();
             if (fresh) prefs.clearBoard();
             else prefs.boardId(bid);
+            prefs.personal(false);
             lastTasks = null;
             sections.clear();
             activeSection = "";
@@ -1230,54 +1249,22 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         showSafe(dlg);
     }
 
-    private void sectionRename(final String oldId, final String name) {
+    private void sectionRename(final String id, final String name) {
         final String board = prefs.boardId();
         final String base = prefs.base();
         final String key = prefs.key();
-        final List<String> taskIds = new ArrayList<>();
-        JSONArray arr = lastTasks == null ? null : lastTasks.optJSONArray("tasks");
-        if (arr != null) {
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject t = arr.optJSONObject(i);
-                if (t == null) continue;
-                if (oldId.equals(t.optString("Section", ""))) taskIds.add(t.optString("Id", ""));
-            }
-        }
         pool.execute(() -> {
-            int code = 0;
-            String newId = "";
+            int code = -1;
             try {
+                // один атомарный rename вместо add+update+del: при обрыве
+                // посередине задачи не остаются в удалённом разделе
                 JSONObject body = new JSONObject();
+                body.put("id", id);
                 body.put("name", name);
-                Api.Reply r = Api.post(base + "/api/b/section/add?b=" + board, key, body.toString());
-                code = r.status;
-                if (code == 200) {
-                    JSONObject sec = r.json().optJSONObject("section");
-                    newId = sec == null ? "" : sec.optString("id", "");
-                    if (newId.isEmpty()) code = -1;
-                }
-                if (code == 200) {
-                    for (String tid : taskIds) {
-                        if (tid.isEmpty()) continue;
-                        JSONObject up = new JSONObject();
-                        up.put("id", tid);
-                        up.put("section", newId);
-                        Api.Reply r2 = Api.post(base + "/api/b/update?b=" + board, key, up.toString());
-                        if (r2.status == 401 || r2.status == 403) {
-                            code = r2.status;
-                            break;
-                        }
-                    }
-                }
-                if (code == 200) {
-                    JSONObject del = new JSONObject();
-                    del.put("id", oldId);
-                    code = Api.post(base + "/api/b/section/del?b=" + board, key, del.toString()).status;
-                }
+                code = Api.post(base + "/api/b/section/set?b=" + board, key, body.toString()).status;
             } catch (Api.AuthException e) {
                 code = 401;
             } catch (Exception ignored) {
-                code = -1;
             }
             final int f = code;
             uiPost(() -> {
@@ -1649,6 +1636,14 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(i);
+            // после установки старый APK больше не "доступен": иначе плашка
+            // висела вечно и блокировала проверку следующих версий
+            pendingUpdate = "";
+            pendingName = "";
+            pendingNotes = "";
+            pendingSha = "";
+            pendingApk = null;
+            prefs.clearUpdate();
         } catch (Exception e) {
             toast(R.string.install_failed);
         }
