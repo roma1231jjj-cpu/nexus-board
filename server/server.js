@@ -380,7 +380,7 @@ function readTasks() {
     const raw = fs.readFileSync(TASKS, "utf8");
     const d = JSON.parse(raw);
     const mtime = fs.statSync(TASKS).mtime.toISOString();
-    return { ok: true, file: mtime, mode: d.Mode || "idle", updated: d.Updated || "", tasks: d.Tasks || [] };
+    return { ok: true, file: mtime, mode: d.Mode || d.mode || "idle", updated: d.Updated || d.updated || "", tasks: d.Tasks || d.tasks || [] };
   } catch (e) {
     return { ok: false, error: String(e.message || e), mode: "idle", updated: "", tasks: [] };
   }
@@ -480,7 +480,7 @@ function cleanView(payload, prev) {
   return out;
 }
 
-const MODES = ["auto", "task", "night"];
+const MODES = ["auto", "task", "night", "idle"];
 const STATUSES = ["todo", "doing", "blocked", "done"];
 
 const syncTask = (t) => ({
@@ -1101,7 +1101,12 @@ function handle(req, res) {
               }))
               .filter((sec) => sec.name);
           }
-          if (payload.mode) data.mode = String(payload.mode).slice(0, 12);
+          if (payload.mode != null) {
+            const mode = String(payload.mode).trim();
+            if (!MODES.includes(mode)) return json(res, 400, { ok: false, error: "bad mode" });
+            data.mode = mode;
+            delete data.Mode;
+          }
           if (!trySave(res, data)) return;
           return json(res, 200, {
             ok: true,
@@ -1183,6 +1188,7 @@ function handle(req, res) {
         url === "/api/b/update" ||
         url === "/api/b/delete" ||
         url === "/api/b/clear" ||
+        url === "/api/b/mode" ||
         url === "/api/b/section/add" ||
         url === "/api/b/section/set" ||
         url === "/api/b/section/del") &&
@@ -1257,6 +1263,16 @@ function handle(req, res) {
             if (data.tasks.length === before) return json(res, 404, { ok: false, error: "task not found" });
             if (!trySave(res, data)) return;
             return json(res, 200, { ok: true, tasks: data.tasks.length });
+          }
+
+          if (url === "/api/b/mode") {
+            const mode = String(payload.mode || "").trim();
+            if (!MODES.includes(mode)) return json(res, 400, { ok: false, error: "bad mode" });
+            data.mode = mode;
+            delete data.Mode;
+            data.updated = new Date().toISOString();
+            if (!trySave(res, data)) return;
+            return json(res, 200, { ok: true, mode });
           }
 
           if (url === "/api/b/add") {

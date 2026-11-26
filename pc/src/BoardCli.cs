@@ -591,6 +591,14 @@ namespace NexusBoard.Cli
             return t;
         }
 
+        public static void SetMode(string mode)
+        {
+            var body = new Dictionary<string, object> { { "mode", mode } };
+            var o = Parse(Call("/api/b/mode", Ser(body), "ERR доски " + BoardId + " нет на сервере"));
+            if (!o.ContainsKey("ok") || !Convert.ToBoolean(o["ok"]))
+                throw new RemoteError("ERR сервер не сменил режим", 0);
+        }
+
         public static Dictionary<string, object> Update(string id, Dictionary<string, object> fields, string notFound)
         {
             var body = new Dictionary<string, object>();
@@ -1532,8 +1540,13 @@ namespace NexusBoard.Cli
                         }
                         if (remote)
                         {
-                            Out("OK режим " + m + " (только локальная доска: на сервере режима нет)");
-                            return 0;
+                            try
+                            {
+                                Remote.SetMode(m);
+                                Out("OK режим " + m + " (доска на сервере)");
+                                return 0;
+                            }
+                            catch (RemoteError e) { Out(e.Message); return 1; }
                         }
                         Store.Mutate(b => { b.Mode = m; return 0; });
                         Store.Log("mode", Lang.T("log.mode") + " " + m);
@@ -1649,7 +1662,7 @@ namespace NexusBoard.Cli
                     return 0;
                 }
                 var tasks = Remote.ToItems(board);
-                Out("режим: сервер   задач: " + tasks.Count);
+                Out("режим: " + (board.ContainsKey("mode") ? Convert.ToString(board["mode"]) : "server") + "   задач: " + tasks.Count);
                 PrintTasks(tasks);
                 return 0;
             }

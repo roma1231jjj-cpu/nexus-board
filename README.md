@@ -28,7 +28,7 @@ Nexus × АутSquad · RU/EN · три темы · без аккаунтов и
 | `NexusBoard-portable.zip` | Она же плюс README |
 | `NexusBoard-setup.exe` | Установщик: копирует в `%LOCALAPPDATA%\NexusBoard`, делает ярлыки на рабочем столе и в «Пуске», добавляет запись в «Удаление программ» |
 
-Windows 10/11 и .NET Framework 4.8 (в Windows 10/11 уже есть). Кнопка обновления появляется в шапке только когда новая версия действительно есть, а скачанный файл проверяется по SHA-256 и подписи.
+Windows 10/11 и .NET Framework 4.8 (в Windows 10/11 уже есть). Кнопка обновления появляется в шапке только когда новая версия действительно есть, а скачанный файл проверяется по SHA-256.
 
 ## Телефон
 
@@ -78,7 +78,7 @@ curl "https://board.nexus-your-heper.ru/api/b/section?b=<id>"
 curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 ```
 
-`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Лимиты: 200 задач и 20 разделов на доску.
+`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night` · `idle`. `progress`: 0–100. Лимиты: 200 задач и 20 разделов на доску.
 
 Ключ доски — это и есть авторизация: кто знает ключ, тот видит доску. Ничего другого сервер про пользователя не хранит, аналитики и трекинга нет, наружу отдаются только задачи и разделы.
 
@@ -136,7 +136,7 @@ NexusBoard.exe --code-pull <id> [--out E:\patch.diff]
 | `NexusBoard-portable.zip` | Portable build plus README. |
 | `NexusBoard-setup.exe` | Installer: copies to `%LOCALAPPDATA%\NexusBoard`, adds desktop and Start-menu shortcuts and an uninstall entry. |
 
-Windows 10/11 with .NET Framework 4.8 (already present). The update button appears only when a newer build exists, and the downloaded file is checked against SHA-256 and the app signature.
+Windows 10/11 with .NET Framework 4.8 (already present). The update button appears only when a newer build exists, and the downloaded file is checked against SHA-256.
 
 Android 13+ (`minSdk 33`). The board refreshes every 10 seconds while the app is open; APK updates are offered manually and checked against SHA-256.
 
@@ -167,7 +167,7 @@ curl "https://board.nexus-your-heper.ru/api/b/section?b=<id>"
 curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 ```
 
-`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board. The key is the whole authorisation: whoever knows it sees the board — keep it private and do not commit it to git. Nothing else about the user is stored, no tracking, only tasks and sections are served.
+`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night` · `idle`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board. The key is the whole authorisation: whoever knows it sees the board — keep it private and do not commit it to git. Nothing else about the user is stored, no tracking, only tasks and sections are served.
 
 **Your own server:** the backend ships in this same repo, folder `server`, no database.
 

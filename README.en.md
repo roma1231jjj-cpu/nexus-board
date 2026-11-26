@@ -25,14 +25,14 @@ No sign-up, no password, no link to our account: the key is the only thing conne
 | File | What it is |
 |---|---|
 | `NexusBoard.exe` | Portable build, installs nothing |
-| `NexusBoard-portable-2.0.2.zip` | The same plus a README |
+| `NexusBoard-portable-2.2.2.zip` | The same plus a README |
 | `NexusBoard-setup.exe` | Installer: copies to `%LOCALAPPDATA%\NexusBoard`, creates desktop and Start menu shortcuts, adds an entry to “Add or remove programs” |
 
 Windows 10/11 and .NET Framework 4.8 (already present in Windows 10/11). When a new version ships, an update button appears in the header.
 
 ## Phone
 
-Android 13+ (minSdk 33). The APK updates itself; the board and training screens refresh every 10 seconds while the app is open.
+Android 13+ (minSdk 33). APK updates are offered manually and checked with SHA-256; the board and training screens refresh every 10 seconds while the app is open.
 
 ## What it does
 
@@ -79,7 +79,7 @@ curl "https://board.nexus-your-heper.ru/api/b/section?b=<id>"
 curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 ```
 
-`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board.
+`status`: `todo` · `doing` · `blocked` · `done`. `mode`: `auto` · `task` · `night` · `idle`. `progress`: 0–100. Limits: 200 tasks and 20 sections per board.
 
 ## Chat API
 
