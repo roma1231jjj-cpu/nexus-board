@@ -28,11 +28,11 @@ No sign-up, no password, no link to our account: the key is the only thing conne
 | `NexusBoard-portable-2.0.2.zip` | The same plus a README |
 | `NexusBoard-setup.exe` | Installer: copies to `%LOCALAPPDATA%\NexusBoard`, creates desktop and Start menu shortcuts, adds an entry to “Add or remove programs” |
 
-Windows 7+ and .NET Framework 4.7+ (already present in Windows 10/11). When a new version ships, an update button appears in the header.
+Windows 10/11 and .NET Framework 4.8 (already present in Windows 10/11). When a new version ships, an update button appears in the header.
 
 ## Phone
 
-Android 7+. The APK updates itself; the board and training screens refresh every 10 seconds while the app is open.
+Android 13+ (minSdk 33). The APK updates itself; the board and training screens refresh every 10 seconds while the app is open.
 
 ## What it does
 
@@ -102,7 +102,7 @@ NexusBoard.exe --chat-say "reply"
 ## Build from source
 
 - Android: `gradle assembleRelease` (Gradle 8.10, minSdk 24), APK in `app/build/outputs/apk/release/`.
-- PC: `pc\build.cmd` (csc from .NET Framework 4.7), installer: `pc\setup\build.cmd`.
+- PC: `pc\build.cmd` (csc from .NET Framework 4.8), installer: `pc\setup\build.cmd`.
 - Server: `node server/server.js` (port 8788, key in `server/token.txt`).
 
 ## Sections the AI builds
