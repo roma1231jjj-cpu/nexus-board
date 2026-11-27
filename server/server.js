@@ -1475,11 +1475,16 @@ function handle(req, res) {
         throw storageFull("chat storage full");
       }
       const data = loadChat(id);
+      const last = data.messages.length
+        ? Number(data.messages[data.messages.length - 1].ts) || 0
+        : 0;
       const msg = {
         id: crypto.randomBytes(8).toString("hex"),
         from,
         text,
-        ts: Date.now(),
+        // монотонное время: два сообщения в одну миллисекунду не должны
+        // сливаться и теряться при выборке since
+        ts: Math.max(Date.now(), last + 1),
       };
       data.messages.push(msg);
       if (data.messages.length > 500) data.messages = data.messages.slice(-500);

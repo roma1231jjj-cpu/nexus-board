@@ -15,9 +15,9 @@ using System.Web.Script.Serialization;
 [assembly: System.Reflection.AssemblyTitle("Nexus Board")]
 [assembly: System.Reflection.AssemblyProduct("Nexus Board")]
 [assembly: System.Reflection.AssemblyCompany("Nexus x AutSquad")]
-[assembly: System.Reflection.AssemblyFileVersion("2.2.4")]
-[assembly: System.Reflection.AssemblyVersion("2.2.4")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.2.4")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.5")]
+[assembly: System.Reflection.AssemblyVersion("2.2.5")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.2.5")]
 
 namespace NexusBoard
 {
@@ -29,8 +29,8 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.2.4";
-        public const int VersionCode = 20;
+        public const string Version = "2.2.5";
+        public const int VersionCode = 21;
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
@@ -73,11 +73,13 @@ namespace NexusBoard
                 {
                     string target = args[1];
                     string self = Application.ExecutablePath;
+                    bool copied = false;
                     for (int i = 0; i < 40; i++)
                     {
                         try
                         {
                             File.Copy(self, target, true);
+                            copied = true;
                             break;
                         }
                         catch
@@ -85,9 +87,33 @@ namespace NexusBoard
                             Thread.Sleep(500);
                         }
                     }
+                    if (!copied)
+                    {
+                        System.Windows.Forms.MessageBox.Show(
+                            "Не удалось заменить " + target + " — обновление не установлено.",
+                            "Nexus Board", System.Windows.Forms.MessageBoxButtons.OK,
+                            System.Windows.Forms.MessageBoxIcon.Warning);
+                        return;
+                    }
                     System.Diagnostics.Process.Start(target);
+                    // временный exe обновления больше не нужен; удаляем его
+                    // после выхода текущего процесса
+                    try
+                    {
+                        var psi = new System.Diagnostics.ProcessStartInfo(
+                            "cmd.exe", "/c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + self + "\"");
+                        psi.UseShellExecute = false;
+                        psi.CreateNoWindow = true;
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                    catch { }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Windows.Forms.MessageBox.Show(ex.Message, "Nexus Board",
+                        System.Windows.Forms.MessageBoxButtons.OK,
+                        System.Windows.Forms.MessageBoxIcon.Warning);
+                }
                 return;
             }
 
@@ -3160,6 +3186,9 @@ namespace NexusBoard
                 : "Скачано обновление " + ver + ", установить сейчас? Приложение перезапустится.";
             if (MessageBox.Show(this, q, "Nexus Board", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
             {
+                // отказ от установки не должен оставлять десятки мегабайт
+                // в %TEMP% до следующей попытки
+                try { File.Delete(file); } catch { }
                 lblSub.Text = (L.Lang == "en" ? "update " : "обновление ") + ver +
                     (L.Lang == "en" ? " is ready — press ↓" : " готово — нажми ↓");
                 return;
