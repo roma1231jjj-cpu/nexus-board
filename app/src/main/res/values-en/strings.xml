@@ -33,7 +33,8 @@
     <string name="copy_key">Copy</string>
     <string name="paste_key">Paste from clipboard</string>
     <string name="apply_key">Connect</string>
-    <string name="connect_hint">A board key is 16 characters. Paste the key from another device so both show the same board. Works both ways: phone to PC and PC to phone.</string>
+    <string name="connect_hint">A board key is 16 characters. Type it in groups of four: 7140-A973-CFE1-946D — or paste the key from another device. Works both ways: phone to PC and PC to phone.</string>
+    <string name="code_example">e.g. 7140-A973-CFE1-946D</string>
     <string name="key_bad">A key must be 16 characters (0-9, a-f)</string>
     <string name="key_empty_clip">Clipboard is empty</string>
     <string name="key_copied">Key copied</string>

@@ -12,7 +12,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -602,13 +604,54 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         return box;
     }
 
+    /** Код для глаза и диктовки: 7140-A973-CFE1-946D. */
+    private static String formatBoardCode(String raw) {
+        String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        if (v.length() != 16) return v;
+        StringBuilder sb = new StringBuilder(19);
+        for (int i = 0; i < v.length(); i++) {
+            if (i > 0 && i % 4 == 0) sb.append('-');
+            sb.append(Character.toUpperCase(v.charAt(i)));
+        }
+        return sb.toString();
+    }
+
     private void openConnect() {
-        final EditText input = makeInput(prefs.boardId(), "0123456789abcdef", false);
+        final EditText input = makeInput(formatBoardCode(prefs.boardId()), "7140-A973-CFE1-946D", false);
+        input.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setTypeface(Typeface.MONOSPACE);
 
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(20), dp(4), dp(20), 0);
         box.addView(input);
+
+        final TextView preview = new TextView(this);
+        preview.setTextSize(11.5f);
+        preview.setTypeface(Typeface.MONOSPACE);
+        preview.setTextColor(NxBackdrop.color(this, R.attr.nxTextDim));
+        LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        vlp.topMargin = dp(8);
+        box.addView(preview, vlp);
+        final Runnable showCode = () -> {
+            String raw = cleanKey(input.getText().toString());
+            if (raw.isEmpty()) {
+                preview.setText(getString(R.string.code_example));
+            } else if (raw.length() < 16) {
+                preview.setText(formatBoardCode(raw) + "  " + raw.length() + "/16");
+            } else {
+                preview.setText(formatBoardCode(raw) + "  ✓");
+            }
+        };
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+            @Override public void afterTextChanged(Editable s) { showCode.run(); }
+        });
+        showCode.run();
 
         TextView paste = new TextView(this);
         paste.setText(getString(R.string.paste_key));
@@ -631,6 +674,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
             CharSequence raw = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
             // Keep the whole link: applyKey() reads both b= and k= from it.
             input.setText(String.valueOf(raw).trim());
+            input.setSelection(input.getText().length());
             if (input.getText().length() > 0) input.setSelection(input.getText().length());
         });
 

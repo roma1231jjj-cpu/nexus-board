@@ -15,9 +15,9 @@ using System.Web.Script.Serialization;
 [assembly: System.Reflection.AssemblyTitle("Nexus Board")]
 [assembly: System.Reflection.AssemblyProduct("Nexus Board")]
 [assembly: System.Reflection.AssemblyCompany("Nexus x AutSquad")]
-[assembly: System.Reflection.AssemblyFileVersion("2.2.6")]
-[assembly: System.Reflection.AssemblyVersion("2.2.6")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.2.6")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.7")]
+[assembly: System.Reflection.AssemblyVersion("2.2.7")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.2.7")]
 
 namespace NexusBoard
 {
@@ -29,7 +29,7 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.2.6";
+        public const string Version = "2.2.7";
         public const int VersionCode = 22;
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
@@ -580,7 +580,7 @@ namespace NexusBoard
             { "key", new[] { "ключ", "key" } },
             { "server", new[] { "Адрес сервера", "Server URL" } },
             { "sync", new[] { "Ключ синхронизации доски", "Board sync key" } },
-            { "sync_hint", new[] { "Один и тот же ключ на ПК и телефоне — одна доска.", "Same key on PC and phone means one shared board." } },
+            { "sync_hint", new[] { "Один и тот же ключ на ПК и телефоне — одна доска. Можно набирать группами: 7140-A973-CFE1-946D.", "Same key on PC and phone means one shared board. You can type it in groups: 7140-A973-CFE1-946D." } },
             { "newboard", new[] { "Создать новую доску", "Create a new board" } },
             { "copied", new[] { "Ключ скопирован", "Key copied" } },
             { "save", new[] { "Сохранить", "Save" } },
@@ -2948,7 +2948,7 @@ namespace NexusBoard
             using (var dlg = new KeyDialog(th, boardId))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                string key = (dlg.Key ?? "").Trim().ToLowerInvariant();
+                string key = NormalizeBoardKey(dlg.Key);
                 if (!IsBoardKey(key))
                 {
                     MessageBox.Show(this, L.Lang == "en"
@@ -2984,6 +2984,45 @@ namespace NexusBoard
                 if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
             }
             return true;
+        }
+
+        /// <summary>Код доски для глаза и диктовки: 7140-A973-CFE1-946D.</summary>
+        internal static string FormatBoardKey(string key)
+        {
+            string v = (key ?? "").Trim().ToLowerInvariant();
+            if (!IsBoardKey(v)) return key ?? "";
+            var sb = new StringBuilder(19);
+            for (int i = 0; i < v.Length; i++)
+            {
+                if (i > 0 && i % 4 == 0) sb.Append('-');
+                sb.Append(char.ToUpperInvariant(v[i]));
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Код из руки или из ссылки: регистр, дефисы и пробелы не важны,
+        /// в ссылке b= главнее k= — иначе из ?b=id&amp;k=key взялся бы ключ.
+        /// </summary>
+        internal static string NormalizeBoardKey(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            string v = raw.Trim();
+            int at = v.IndexOf("b=", StringComparison.OrdinalIgnoreCase);
+            if (at >= 0) v = v.Substring(at + 2);
+            else
+            {
+                at = v.IndexOf("k=", StringComparison.OrdinalIgnoreCase);
+                if (at >= 0) v = v.Substring(at + 2);
+            }
+            var sb = new StringBuilder(16);
+            foreach (char c in v)
+            {
+                if (sb.Length >= 16) break;
+                char d = char.ToLowerInvariant(c);
+                if ((d >= '0' && d <= '9') || (d >= 'a' && d <= 'f')) sb.Append(d);
+            }
+            return sb.ToString();
         }
 
         void OpenSettings()
@@ -3546,52 +3585,68 @@ namespace NexusBoard
             Controls.Add(new Label
             {
                 Text = L.Lang == "en"
-                    ? "Paste the key from another device — phone or PC. Both ways work: the phone can join the PC board and the PC can join the phone board."
-                    : "Вставь ключ с другого устройства — телефона или ПК. Работает в обе стороны: телефон подключается к доске ПК, ПК — к доске телефона.",
-                Location = new Point(20, 18),
-                Size = new Size(500, 62),
+                    ? "Type the key in groups of four (7140-A973-CFE1-946D) or paste it from another device. Both ways work: phone to PC and PC to phone."
+                    : "Набери ключ группами по четыре (7140-A973-CFE1-946D) или вставь с другого устройства. Работает в обе стороны: телефон к ПК и ПК к телефону.",
+                Location = new Point(20, 16),
+                Size = new Size(520, 62),
                 ForeColor = th.Dim
             });
 
             var box = new TextBox
             {
-                Location = new Point(20, 88),
+                Location = new Point(20, 84),
                 Width = 380,
-                Text = current ?? "",
+                Text = MainForm.FormatBoardKey(current),
                 BackColor = th.Card,
                 ForeColor = th.Text,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = FontCache.Get("Segoe UI", 12f, FontStyle.Regular)
+                Font = FontCache.Get("Consolas", 12f, FontStyle.Regular),
+                MaxLength = 64
             };
             Controls.Add(box);
 
-            var paste = new FlatButton { Text = L.Lang == "en" ? "Paste" : "Вставить", Location = new Point(410, 86), Size = new Size(110, 30), BackColor = th.Card, ForeColor = th.Text };
+            var hint = new Label
+            {
+                Location = new Point(20, 118),
+                Size = new Size(520, 22),
+                ForeColor = th.Dim
+            };
+            Controls.Add(hint);
+
+            var paste = new FlatButton { Text = L.Lang == "en" ? "Paste" : "Вставить", Location = new Point(410, 82), Size = new Size(110, 30), BackColor = th.Card, ForeColor = th.Text };
             paste.Click += (s, e) =>
             {
                 try
                 {
                     string clip = Clipboard.GetText();
-                    if (!string.IsNullOrEmpty(clip)) box.Text = Normalize(clip);
+                    if (!string.IsNullOrWhiteSpace(clip)) box.Text = MainForm.FormatBoardKey(MainForm.NormalizeBoardKey(clip));
                 }
                 catch { }
             };
             Controls.Add(paste);
 
-            var copy = new FlatButton { Text = L.Lang == "en" ? "Copy" : "Копировать", Location = new Point(20, 132), Size = new Size(150, 30), BackColor = th.Card, ForeColor = th.Text };
-            copy.Click += (s, e) => { try { Clipboard.SetText(box.Text.Trim()); } catch { } };
+            var copy = new FlatButton { Text = L.Lang == "en" ? "Copy" : "Копировать", Location = new Point(410, 118), Size = new Size(110, 30), BackColor = th.Card, ForeColor = th.Text };
+            copy.Click += (s, e) => { try { Clipboard.SetText(MainForm.NormalizeBoardKey(box.Text)); } catch { } };
             Controls.Add(copy);
 
-            var hint = new Label
+            Action showCode = () =>
             {
-                Text = L.Lang == "en" ? "16 characters: 0-9, a-f" : "16 символов: 0-9, a-f",
-                Location = new Point(184, 138),
-                AutoSize = true,
-                ForeColor = th.Dim
+                string raw = MainForm.NormalizeBoardKey(box.Text);
+                if (raw.Length == 0)
+                {
+                    hint.Text = L.Lang == "en" ? "example: 7140-A973-CFE1-946D" : "например: 7140-A973-CFE1-946D";
+                    return;
+                }
+                string code = MainForm.FormatBoardKey(raw);
+                hint.Text = raw.Length < 16
+                    ? code + "  " + raw.Length + "/16"
+                    : code + (L.Lang == "en" ? "  ✓ ready" : "  ✓ можно подключать");
             };
-            Controls.Add(hint);
+            box.TextChanged += (s, e) => showCode();
+            showCode();
 
             var ok = new FlatButton { Text = L.Lang == "en" ? "Connect" : "Подключить", Location = new Point(300, 176), Size = new Size(140, 34), BackColor = th.Accent, ForeColor = th.AccentText };
-            ok.Click += (s, e) => { Key = Normalize(box.Text); DialogResult = DialogResult.OK; Close(); };
+            ok.Click += (s, e) => { Key = MainForm.NormalizeBoardKey(box.Text); DialogResult = DialogResult.OK; Close(); };
             Controls.Add(ok);
 
             var cancel = new FlatButton { Text = L.Lang == "en" ? "Cancel" : "Отмена", Location = new Point(450, 176), Size = new Size(90, 34), BackColor = th.Card, ForeColor = th.Text };
@@ -3599,22 +3654,7 @@ namespace NexusBoard
             Controls.Add(cancel);
 
             AcceptButton = null;
-            box.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { Key = Normalize(box.Text); DialogResult = DialogResult.OK; Close(); } };
-        }
-
-        static string Normalize(string raw)
-        {
-            if (string.IsNullOrEmpty(raw)) return "";
-            string v = raw.Trim().ToLowerInvariant();
-            int at = v.IndexOf("k=", StringComparison.Ordinal);
-            if (at >= 0) v = v.Substring(at + 2);
-            var sb = new StringBuilder();
-            foreach (char c in v)
-            {
-                if (sb.Length >= 16) break;
-                if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) sb.Append(c);
-            }
-            return sb.ToString();
+            box.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { Key = MainForm.NormalizeBoardKey(box.Text); DialogResult = DialogResult.OK; Close(); } };
         }
     }
 
@@ -3650,11 +3690,11 @@ namespace NexusBoard
 
             Controls.Add(new Label { Text = L.T("sync"), Location = new Point(20, y), AutoSize = true, ForeColor = th.Dim });
             y += 24;
-            var key = new TextBox { Location = new Point(20, y), Width = 420, Text = BoardId, BackColor = th.Card, ForeColor = th.Text, BorderStyle = BorderStyle.FixedSingle };
+            var key = new TextBox { Location = new Point(20, y), Width = 420, Text = MainForm.FormatBoardKey(BoardId), BackColor = th.Card, ForeColor = th.Text, BorderStyle = BorderStyle.FixedSingle, Font = FontCache.Get("Consolas", 11f, FontStyle.Regular), MaxLength = 64 };
             Controls.Add(key);
 
             var copy = new FlatButton { Text = L.T("copy"), Location = new Point(450, y - 2), Size = new Size(150, 28), BackColor = th.Card, ForeColor = th.Text };
-            copy.Click += (snd, e) => { try { Clipboard.SetText(key.Text.Trim()); } catch { } };
+            copy.Click += (snd, e) => { try { Clipboard.SetText(MainForm.NormalizeBoardKey(key.Text)); } catch { } };
             Controls.Add(copy);
             y += 30;
 
@@ -3713,7 +3753,7 @@ namespace NexusBoard
                     MessageBox.Show(this, BadUrlText(), "Nexus Board", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-                string board = (key.Text ?? "").Trim().ToLowerInvariant();
+                string board = MainForm.NormalizeBoardKey(key.Text);
                 if (board.Length > 0 && !MainForm.IsBoardKey(board))
                 {
                     MessageBox.Show(this, L.Lang == "en"

@@ -30,9 +30,13 @@ android {
         applicationId = "ru.nexus.board"
         minSdk = 24
         targetSdk = 34
-        versionCode = 16
-        versionName = "2.2.2"
+        versionCode = 18
+        versionName = "2.2.4"
         buildFeatures { buildConfig = true }
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     lint {
@@ -86,4 +90,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }

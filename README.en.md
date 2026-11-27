@@ -14,8 +14,8 @@ Nexus × АутSquad · RU/EN · three themes · no accounts, no subscriptions
 ## How it works
 
 1. Install the app on your phone and/or PC.
-2. On first launch a **personal board** is created and its 16-character key is shown.
-3. Paste the same key into the second app (on the phone: long-press the title, “Board key”).
+2. On first launch a **personal board** is created and its 16-character key is shown — type it by hand in groups of four: `7140-A973-CFE1-946D`.
+3. Type or paste the same key into the second app (on the phone: the key button in the header, or long-press the title). Dashes, spaces and letter case do not matter.
 4. From then on your AI fills the board: it creates section tabs and tasks with plain HTTP requests.
 
 No sign-up, no password, no link to our account: the key is the only thing connecting your devices.
@@ -126,8 +126,8 @@ MIT — see [LICENSE](LICENSE).
 
 The conversation lives in the same app: 💬 in the phone header, the “Chat” tab on PC. Replies arrive on their own, history is kept per board key.
 
-| Chat on PC | Key on the phone (paste from clipboard) |
+| Chat on PC | Key on the phone (type in groups or paste) |
 |---|---|
 | ![](docs/en-pc-chat.png) | ![](docs/en-key-android.png) |
 
-The key can be pasted from the clipboard — the phone joins the PC board and the other way around.
+The key can be typed by hand in groups of four or pasted from the clipboard — the phone joins the PC board and the other way around.

@@ -33,7 +33,8 @@
     <string name="copy_key">Скопировать</string>
     <string name="paste_key">Вставить из буфера</string>
     <string name="apply_key">Подключить</string>
-    <string name="connect_hint">Ключ доски — 16 символов. Вставь ключ с другого устройства, чтобы оба показывали одну доску. Работает в обе стороны: телефон к ПК и ПК к телефону.</string>
+    <string name="connect_hint">Ключ доски — 16 символов. Набирай группами по четыре: 7140-A973-CFE1-946D — или вставь ключ с другого устройства. Работает в обе стороны: телефон к ПК и ПК к телефону.</string>
+    <string name="code_example">например: 7140-A973-CFE1-946D</string>
     <string name="key_bad">Нужен ключ из 16 символов (0-9, a-f)</string>
     <string name="key_empty_clip">В буфере нет текста</string>
     <string name="key_copied">Ключ скопирован</string>

@@ -31,7 +31,7 @@
                     android:layout_height="wrap_content"
                     android:text="@string/app_name"
                     android:textColor="?attr/nxText"
-                    android:textSize="19sp"
+                    android:textSize="18sp"
                     android:maxLines="1"
                     android:ellipsize="end"
                     android:textStyle="bold" />
@@ -50,9 +50,9 @@
 
             <TextView
                 android:id="@+id/btn_chat"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="42dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:gravity="center"
                 android:text="💬"
                 android:textColor="?attr/nxText"
@@ -62,9 +62,9 @@
 
             <TextView
                 android:id="@+id/btn_lang"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="42dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:gravity="center"
                 android:text="EN"
                 android:textColor="?attr/nxText"
@@ -74,9 +74,9 @@
 
             <TextView
                 android:id="@+id/btn_theme"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="42dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:gravity="center"
                 android:text="◐"
                 android:textColor="?attr/nxPrimary"
@@ -85,9 +85,9 @@
 
             <TextView
                 android:id="@+id/btn_key"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="42dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:gravity="center"
                 android:text="🔑"
                 android:textColor="?attr/nxText"
@@ -96,9 +96,9 @@
 
             <TextView
                 android:id="@+id/btn_update"
-                android:layout_width="40dp"
+                android:layout_width="38dp"
                 android:layout_height="42dp"
-                android:layout_marginStart="6dp"
+                android:layout_marginStart="4dp"
                 android:gravity="center"
                 android:text="↓"
                 android:textColor="?attr/nxPrimary"

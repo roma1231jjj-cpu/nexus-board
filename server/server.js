@@ -241,6 +241,9 @@ function countFiles(dir, ext) {
 
 const boardFile = (id) => path.join(BOARDS, id + ".json");
 const validBoardId = (id) => /^[a-f0-9]{16}$/.test(String(id || ""));
+// Код доски люди набирают руками: 7140-A973-CFE1-946D и 7140 A973 ... —
+// это тот же id, дефисы и пробелы просто не в счёт.
+const normBoardId = (id) => String(id || "").trim().toLowerCase().replace(/[^0-9a-f]/g, "");
 
 // очередь по ключу файла: два POST не теряют обновления друг друга
 const locks = new Map();
@@ -1041,7 +1044,7 @@ function handle(req, res) {
 
   // ---------- личные доски: без аккаунтов и ключей ----------
   if (isBoardApi) {
-    const bid = String(parsed.searchParams.get("b") || req.headers["x-board"] || "").trim();
+    const bid = normBoardId(parsed.searchParams.get("b") || req.headers["x-board"] || "");
     const boardKey = String(parsed.searchParams.get("k") || cookieValue(req, "nxt") || "").trim();
 
     if (url === "/api/b/new" && req.method === "POST") {
@@ -1492,7 +1495,7 @@ function handle(req, res) {
 
   // ---------- чат доски ----------
   if (isChatApi) {
-    const queryId = String(parsed.searchParams.get("board") || "").trim();
+    const queryId = normBoardId(parsed.searchParams.get("board") || "");
     const chatKey = String(parsed.searchParams.get("k") || cookieValue(req, "nxt") || "").trim();
     const chatAuthorized = (id) => {
       try {
@@ -1543,7 +1546,7 @@ function handle(req, res) {
       return withBody(req, res, (raw) => {
         const p = parseJson(raw);
         if (!p.ok) return json(res, 400, { ok: false, error: "bad json" });
-        const id = String(p.payload.board || queryId || "").trim();
+        const id = normBoardId(p.payload.board || queryId || "");
         if (!validBoardId(id)) return json(res, 400, { ok: false, error: "bad board id" });
         // отправителя не подделываем: только ai или owner, иначе 400
         const from = String(p.payload.from == null ? "" : p.payload.from)
