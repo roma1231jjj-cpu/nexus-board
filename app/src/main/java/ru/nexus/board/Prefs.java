@@ -125,17 +125,23 @@ public final class Prefs {
         return sp.getString("updSha", "");
     }
 
-    public void update(String file, String name, String notes, String sha) {
+    public int updCode() {
+        return sp.getInt("updCode", 0);
+    }
+
+    public void update(String file, String name, String notes, String sha, int code) {
         sp.edit()
                 .putString("updFile", file == null ? "" : file)
                 .putString("updName", name == null ? "" : name)
                 .putString("updNotes", notes == null ? "" : notes)
                 .putString("updSha", sha == null ? "" : sha)
+                .putInt("updCode", code)
                 .apply();
     }
 
     public void clearUpdate() {
-        sp.edit().remove("updFile").remove("updName").remove("updNotes").remove("updSha").apply();
+        sp.edit().remove("updFile").remove("updName").remove("updNotes").remove("updSha")
+                .remove("updCode").apply();
     }
 
     /**
@@ -151,7 +157,9 @@ public final class Prefs {
             id = p.boardId();
             if (validBoardId(id)) return id;
             try {
-                JSONObject o = Api.postJson(p.base() + "/api/b/new", "", "{}");
+                // The site token gates /api/b/new; without it an owner with
+                // no board yet could never create the first one.
+                JSONObject o = Api.postJson(p.base() + "/api/b/new", p.key(), "{}");
                 String fresh = o.optString("id", "").trim().toLowerCase(java.util.Locale.ROOT);
                 if (validBoardId(fresh)) {
                     p.boardId(fresh);

@@ -85,8 +85,10 @@ curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 **Вариант 3 — свой сервер.** Сервер лежит в этом же репозитории, папка `server`, без базы данных:
 
 ```bash
-node server/server.js          # слушает 8788, доски в server/boards/*.json, задачи в data/tasks.json
+node server/server.js          # слушает 127.0.0.1:8788, доски в server/boards/*.json
 NEXUS_SITE_PORT=9000 node server/server.js
+# доступ с телефона в домашней сети: по умолчанию сервер слушает только localhost
+NEXUS_SITE_HOST=0.0.0.0 NEXUS_SITE_PORT=9000 node server/server.js
 ```
 
 В настройках приложения (ПК: `⋯` → Настройки, телефон: долгое нажатие по заголовку) замените адрес сервера на свой — `http://192.168.1.11:9000` в домашней сети или на адрес, куда вы его выставили. Остальное не меняется: `POST /api/b/new` создаст доску уже на вашем сервере.
@@ -173,8 +175,10 @@ curl -X POST "https://board.nexus-your-heper.ru/api/b/clear?b=<id>"
 
 ```bash
 cd server
-node server.js                          # port 8788, boards in server/boards/*.json
+node server.js                          # 127.0.0.1:8788, boards in server/boards/*.json
 NEXUS_SITE_PORT=9000 node server.js
+# phone on the same LAN: the default bind is localhost only
+NEXUS_SITE_HOST=0.0.0.0 NEXUS_SITE_PORT=9000 node server.js
 ```
 
 Site access uses a separate token in `server/token.txt` (or `NEXUS_SITE_TOKEN`); without it the site is open only to localhost.

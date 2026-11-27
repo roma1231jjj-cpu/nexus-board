@@ -85,6 +85,16 @@ public class CodeActivity extends AppCompatActivity {
         return v == null ? "" : v;
     }
 
+    private boolean alive() {
+        return !isFinishing() && !isDestroyed();
+    }
+
+    private void uiPost(Runnable r) {
+        ui.post(() -> {
+            if (alive()) r.run();
+        });
+    }
+
     private int warningColor() {
         return "frost".equals(prefs.theme()) ? 0xFFB45309 : 0xFFF0B429;
     }
@@ -149,7 +159,7 @@ public class CodeActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             final JSONObject fo = o;
-            ui.post(() -> {
+            uiPost(() -> {
                 busy = false;
                 if (fo == null) {
                     setStatus(getString(R.string.net_error), true);
@@ -208,7 +218,7 @@ public class CodeActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             final Api.Reply fr = r;
-            ui.post(() -> {
+            uiPost(() -> {
                 busy = false;
                 if (fr == null) {
                     setStatus(getString(R.string.net_error), true);

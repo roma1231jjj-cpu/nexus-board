@@ -94,6 +94,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
     private String pendingName = "";
     private String pendingNotes = "";
     private String pendingSha = "";
+    private int pendingCode;
     private File pendingApk;
 
     private interface Pick {
@@ -113,6 +114,13 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         pendingName = prefs.updName();
         pendingNotes = prefs.updNotes();
         pendingSha = prefs.updSha();
+        pendingCode = prefs.updCode();
+        // After an install the old process is gone, so any persisted offer for
+        // this or an older build is stale. Unknown code (migration from an
+        // older app) is treated as stale too.
+        if (!pendingUpdate.isEmpty() && pendingCode <= BuildConfig.VERSION_CODE) {
+            clearPendingUpdate();
+        }
 
         status = findViewById(R.id.status);
         tabBoard = findViewById(R.id.tab_board);
@@ -439,7 +447,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         final String board = prefs.boardId();
         final boolean hasBoard = Prefs.validBoardId(board);
         final boolean nexus = !key.isEmpty() && !prefs.personal();
-        if (!nexus && !hasBoard) {
+        if (!hasBoard) {
             status.setText(R.string.connecting);
             ensureBoardAsync();
             return;
@@ -455,27 +463,16 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
             boolean auth = false;
             boolean ownerTasks = nexus;
             String boardPath = "/api/b/tasks?b=" + board
-                    + (key.isEmpty() ? "" : "&k=" + Uri.encode(key, "UTF-8"));
+                    + (key.isEmpty() ? "" : "&k=" + Uri.encode(key));
             try {
-                tasks = nexus
-                        ? Api.json(base, "/api/tasks", key)
-                        : Api.json(base, boardPath, "");
+                // Tasks are edited through /api/b/add|update|delete, so they
+                // must also be read from the same board file. /api/tasks is
+                // the legacy global file and used to show different tasks.
+                tasks = hasBoard
+                        ? Api.json(base, boardPath, "")
+                        : Api.json(base, "/api/tasks", key);
             } catch (Api.AuthException e) {
-                // ключ доски не подошёл к /api/tasks: это личная доска,
-                // а не ошибка владельца — пробуем доску тем же ключом
-                if (nexus && hasBoard) {
-                    try {
-                        tasks = Api.json(base, boardPath, "");
-                        ownerTasks = false;
-                        prefs.personal(true);
-                    } catch (Api.AuthException e2) {
-                        auth = true;
-                    } catch (Exception e2) {
-                        error = e2.getMessage();
-                    }
-                } else {
-                    auth = true;
-                }
+                auth = true;
             } catch (Exception e) {
                 error = e.getMessage();
             }
@@ -632,7 +629,8 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
                 return;
             }
             CharSequence raw = cm.getPrimaryClip().getItemAt(0).coerceToText(this);
-            input.setText(cleanKey(String.valueOf(raw)));
+            // Keep the whole link: applyKey() reads both b= and k= from it.
+            input.setText(String.valueOf(raw).trim());
             if (input.getText().length() > 0) input.setSelection(input.getText().length());
         });
 
@@ -665,8 +663,21 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
 
     private static String cleanKey(String raw) {
         String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-        int at = v.indexOf("k=");
-        if (at >= 0) v = v.substring(at + 2);
+        // Board links use ?b=<board id>&k=<key>; b= must win, otherwise the
+        // first 16 hex chars of a site token could be mistaken for a board.
+        int at = v.indexOf("b=");
+        if (at >= 0) {
+            v = v.substring(at + 2);
+            int end = v.length();
+            for (char stop : new char[] { '&', '#', ' ', '\n', '\r' }) {
+                int p = v.indexOf(stop);
+                if (p >= 0 && p < end) end = p;
+            }
+            v = v.substring(0, end);
+        } else {
+            at = v.indexOf("k=");
+            if (at >= 0) v = v.substring(at + 2);
+        }
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < v.length() && sb.length() < 16; i++) {
             char c = v.charAt(i);
@@ -675,17 +686,45 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         return sb.toString();
     }
 
+    /** Reads b= or k= from a share link, stopping at the next parameter. */
+    private static String linkParam(String text, String name) {
+        int at = text.indexOf(name);
+        if (at < 0) return "";
+        String v = text.substring(at + name.length());
+        int end = v.length();
+        for (char stop : new char[] { '&', '#', ' ', '\n', '\r' }) {
+            int p = v.indexOf(stop);
+            if (p >= 0 && p < end) end = p;
+        }
+        return v.substring(0, end).trim();
+    }
+
     private boolean applyKey(String raw) {
-        String key = cleanKey(raw);
-        if (key.isEmpty()) {
+        String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        // A share link carries both ids. The old code kept only b= and left
+        // the key from another board, so a protected board opened as 401.
+        String board = linkParam(v, "b=");
+        String key = linkParam(v, "k=");
+        if (Prefs.validBoardId(board)) {
+            prefs.boardId(board);
+            if (!key.isEmpty()) prefs.key(key);
+            prefs.personal(false);
+            resetBoardState();
+            toast(R.string.key_ok);
+            load();
+            return true;
+        }
+        String single = cleanKey(v);
+        if (single.isEmpty()) {
             newBoard();
             return true;
         }
-        if (key.length() != 16) {
+        if (single.length() != 16) {
             toast(R.string.key_bad);
             return false;
         }
-        prefs.boardId(key);
+        prefs.boardId(single);
+        prefs.personal(false);
         resetBoardState();
         toast(R.string.key_ok);
         load();
@@ -694,6 +733,7 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
 
     private void newBoard() {
         prefs.clearBoard();
+        prefs.personal(false);
         resetBoardState();
         toast(R.string.board_new);
         ensureBoardAsync();
@@ -1486,10 +1526,26 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         checkUpdates(false);
     }
 
+    private void clearPendingUpdate() {
+        pendingUpdate = "";
+        pendingName = "";
+        pendingNotes = "";
+        pendingSha = "";
+        pendingCode = 0;
+        pendingApk = null;
+        prefs.clearUpdate();
+        // The downloaded APK is only a cache; never leave it behind forever.
+        new File(getCacheDir(), "update.apk").delete();
+    }
+
     private void checkUpdates(final boolean manual) {
         if (!pendingUpdate.isEmpty()) {
-            showUpdateStatus();
-            return;
+            if (pendingCode > BuildConfig.VERSION_CODE) {
+                showUpdateStatus();
+                return;
+            }
+            clearPendingUpdate();
+            resetUpdateButton();
         }
         long last = prefs.lastUpdateCheck();
         if (!manual && System.currentTimeMillis() - last < 6L * 3600L * 1000L) return;
@@ -1511,18 +1567,13 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
                         pendingName = name;
                         pendingNotes = notes;
                         pendingSha = sha;
-                        prefs.update(file, name, notes, sha);
+                        pendingCode = code;
+                        prefs.update(file, name, notes, sha, code);
                         showUpdateStatus();
                     });
                 } else {
                     uiPost(() -> {
-                        if (!pendingUpdate.isEmpty()) {
-                            pendingUpdate = "";
-                            pendingName = "";
-                            pendingNotes = "";
-                            pendingSha = "";
-                            prefs.clearUpdate();
-                        }
+                        if (!pendingUpdate.isEmpty()) clearPendingUpdate();
                         resetUpdateButton();
                         if (manual) toast(R.string.update_none);
                     });
@@ -1636,14 +1687,9 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(i);
-            // после установки старый APK больше не "доступен": иначе плашка
-            // висела вечно и блокировала проверку следующих версий
-            pendingUpdate = "";
-            pendingName = "";
-            pendingNotes = "";
-            pendingSha = "";
-            pendingApk = null;
-            prefs.clearUpdate();
+            // Do not clear yet: startActivity only opens the system installer.
+            // The user may cancel it, and then the update must stay available.
+            // onResume clears the offer once the new versionCode is installed.
         } catch (Exception e) {
             toast(R.string.install_failed);
         }
@@ -1661,6 +1707,10 @@ public class MainActivity extends AppCompatActivity implements BoardAdapter.List
     @Override
     protected void onResume() {
         super.onResume();
+        if (!pendingUpdate.isEmpty() && pendingCode > 0 && BuildConfig.VERSION_CODE >= pendingCode) {
+            clearPendingUpdate();
+            resetUpdateButton();
+        }
         if (!loading) load();
         ui.removeCallbacks(tick);
         ui.postDelayed(tick, REFRESH_MS);

@@ -168,7 +168,7 @@ public class ChatActivity extends AppCompatActivity {
             JSONArray messages = null;
             long maxTs = since;
             try {
-                JSONObject o = Api.json(base, "/api/c/list?board=" + board + "&since=" + since + "&limit=200", "");
+                JSONObject o = Api.json(base, "/api/c/list?board=" + board + "&since=" + since + "&limit=200", prefs.key());
                 messages = o.optJSONArray("messages");
                 if (messages != null) {
                     for (int i = 0; i < messages.length(); i++) {
@@ -273,7 +273,7 @@ public class ChatActivity extends AppCompatActivity {
                 body.put("board", board);
                 body.put("from", "owner");
                 body.put("text", msg.text);
-                JSONObject o = Api.postJson(base + "/api/c/send", "", body.toString());
+                JSONObject o = Api.postJson(base + "/api/c/send", prefs.key(), body.toString());
                 realId = o.optString("id", "");
                 ts = o.optLong("ts", ts);
             } catch (Exception ignored) {

@@ -405,11 +405,32 @@ function safeLogFile(raw) {
   if (!p || p.includes("\0")) return null;
   let full;
   try {
-    full = path.resolve(p);
+    // realpath, not resolve: a symlink inside logs/ must not point at
+    // token.txt, a keystore or a board file.
+    const want = path.resolve(p);
+    try {
+      full = fs.realpathSync(want);
+      if (!fs.statSync(full).isFile()) return null;
+    } catch {
+      // A log may not exist yet. Resolve its parent, so a symlinked
+      // directory still cannot escape the whitelist.
+      const parent = fs.realpathSync(path.dirname(want));
+      full = path.join(parent, path.basename(want));
+      if (fs.existsSync(full) && !fs.statSync(full).isFile()) return null;
+    }
   } catch {
     return null;
   }
-  const inside = LOG_ROOTS.some((root) => full === root || full.startsWith(root + path.sep));
+  const cmp = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+  const target = cmp(full);
+  const inside = LOG_ROOTS.some((root) => {
+    let real = path.resolve(root);
+    try {
+      real = fs.realpathSync(real);
+    } catch {}
+    const base = cmp(real);
+    return target === base || target.startsWith(base + path.sep);
+  });
   if (!inside) return null;
   if (!/\.(log|txt|out|err|jsonl)$/i.test(full)) return null;
   const base = path.basename(full).toLowerCase();
@@ -584,6 +605,11 @@ function ownerSettings() {
   } catch {
     return null;
   }
+}
+
+function isOwnerBoard(id) {
+  const st = ownerSettings();
+  return Boolean(st && validBoardId(id) && String(st.Board || "").toLowerCase() === String(id).toLowerCase());
 }
 
 function ownerBoard() {
@@ -1124,9 +1150,19 @@ function handle(req, res) {
 
     if (url === "/api/b/views" && req.method === "GET") {
       const data = loadBoard(bid);
+      // A board key protects the board, not the owner's logs. Only the
+      // owner's own board may read server/finetune log files.
+      const allowLogs = isOwnerBoard(bid);
       const blocks = viewsOf(data).map((b) => {
         const copy = JSON.parse(JSON.stringify(b));
         if (copy.kind === "log") {
+          if (!allowLogs) {
+            // A public board must not become a reader for the owner's logs.
+            copy.tail = { error: "log views are owner-only" };
+            delete copy.source;
+            if (copy.body) delete copy.body.path;
+            return copy;
+          }
           const p = (copy.source && copy.source.path) || (copy.body && copy.body.path);
           const safe = safeLogFile(p);
           if (safe) copy.tail = tailLines(safe, (copy.source && copy.source.lines) || (copy.body && copy.body.lines) || 40);
@@ -1150,6 +1186,9 @@ function handle(req, res) {
           const prev = id ? findView(data, id) : null;
           if (!prev && blocks.length >= 40) return json(res, 400, { ok: false, error: "too many blocks" });
           const block = cleanView(p.payload, prev);
+          if (block.kind === "log" && !isOwnerBoard(bid)) {
+            return json(res, 403, { ok: false, error: "log views are owner-only" });
+          }
           if (prev) {
             blocks[blocks.indexOf(prev)] = block;
           } else {
@@ -1191,9 +1230,15 @@ function handle(req, res) {
           // стирает задачи, созданные с телефона или сайта.
           const byId = new Map((data.tasks || []).filter((t) => t && t.Id).map((t) => [t.Id, t]));
           for (const t of payload.tasks.slice(0, 400).map(syncTask)) {
-            if (t.Title) byId.set(t.Id, { ...(byId.get(t.Id) || {}), ...t });
+            if (!t.Id || !t.Title) continue;
+            const prev = byId.get(t.Id) || {};
+            // An empty local Section must not erase the section assigned on
+            // the phone or website; only an explicit non-empty value wins.
+            byId.set(t.Id, { ...prev, ...t, Section: t.Section || prev.Section || "" });
           }
-          data.tasks = [...byId.values()];
+          const merged = [...byId.values()];
+          if (merged.length > 200) return json(res, 400, { ok: false, error: "board full" });
+          data.tasks = merged;
           if (Array.isArray(payload.sections)) {
             data.sections = payload.sections
               .slice(0, 20)

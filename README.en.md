@@ -103,7 +103,8 @@ NexusBoard.exe --chat-say "reply"
 
 - Android: `.\gradlew assembleRelease` (Gradle 8.7, minSdk 24), APK in `app/build/outputs/apk/release/`.
 - PC: `pc\build.cmd` (csc from .NET Framework 4.8), installer: `pc\setup\build.cmd`.
-- Server: `node server/server.js` (port 8788, key in `server/token.txt`).
+- Server: `node server/server.js` (127.0.0.1:8788, key in `server/token.txt`).
+- LAN/phone access: `NEXUS_SITE_HOST=0.0.0.0 NEXUS_SITE_PORT=8788 node server/server.js` — the default bind is localhost only.
 
 ## Sections the AI builds
 

@@ -407,7 +407,9 @@ namespace NexusBoard.Cli
                 string b = (s.Base ?? "").Trim().TrimEnd('/');
                 string board = (s.Board ?? "").Trim().ToLowerInvariant();
                 string key = (s.Key ?? "").Trim();
-                if (b.Length == 0 || key.Length == 0) return;
+                // A public board needs no key; requiring one made an empty
+                // key silently fall back to the local file.
+                if (b.Length == 0) return;
                 if (!System.Text.RegularExpressions.Regex.IsMatch(board, "^[a-f0-9]{16}$")) return;
                 _base = b;
                 _board = board;
@@ -586,6 +588,7 @@ namespace NexusBoard.Cli
                 t.Mode = Text(d, "Mode");
                 t.Status = Text(d, "Status");
                 t.Progress = Num(d, "Progress");
+                t.Section = Text(d, "Section");
                 t.Source = Text(d, "Source");
                 t.Created = Text(d, "Created");
                 t.Updated = Text(d, "Updated");
@@ -602,7 +605,7 @@ namespace NexusBoard.Cli
         public static Dictionary<string, object> Add(string title, string note, string mode, int prio, string section, string status, int progress)
         {
             string m = string.IsNullOrEmpty(mode) ? "task" : mode.Trim();
-            if (m != "auto" && m != "task" && m != "night") m = "task";
+            if (m != "auto" && m != "task" && m != "night" && m != "idle") m = "task";
             string st = string.IsNullOrEmpty(status) ? "todo" : status.Trim();
             if (st != "todo" && st != "doing" && st != "blocked" && st != "done") st = "todo";
             int pr = progress < 0 ? 0 : (progress > 100 ? 100 : progress);
@@ -1170,6 +1173,14 @@ namespace NexusBoard.Cli
             return null;
         }
 
+        /// <summary>A value may start with a dash followed by a space, e.g. "- пункт".</summary>
+        static bool IsValueToken(string a)
+        {
+            if (string.IsNullOrEmpty(a)) return false;
+            if (a == "-" || a.StartsWith("- ") || a.StartsWith("-- ")) return true;
+            return KeyOf(a) == null;
+        }
+
         static Dictionary<string, string> Parse(string[] args, out string cmd)
         {
             var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1194,13 +1205,13 @@ namespace NexusBoard.Cli
                     // необязательные значения команд (--start --note ...)
                     // не должны съедать следующий флаг как значение
                     string val = "";
-                    if (i + 1 < args.Length && KeyOf(args[i + 1]) == null) val = args[++i];
+                    if (i + 1 < args.Length && IsValueToken(args[i + 1])) val = args[++i];
                     d[key] = val;
                 }
                 else if (OptionalValueFlags.Contains(key))
                 {
                     string val = "";
-                    if (i + 1 < args.Length && KeyOf(args[i + 1]) == null) val = args[++i];
+                    if (i + 1 < args.Length && IsValueToken(args[i + 1])) val = args[++i];
                     d[key] = val;
                 }
                 else d[key] = "";
@@ -1256,13 +1267,23 @@ namespace NexusBoard.Cli
             }
         }
 
+        /// <summary>Owner key is needed for protected boards; never send it to a foreign board.</summary>
+        static string ChatUrl(string url, NexusBoard.Settings s, string target)
+        {
+            string own = (s.Board ?? "").Trim().ToLowerInvariant();
+            string key = (s.Key ?? "").Trim();
+            if (own.Length == 0 || key.Length == 0 || !string.Equals(own, target, StringComparison.OrdinalIgnoreCase))
+                return url;
+            return url + (url.Contains("?") ? "&" : "?") + "k=" + Uri.EscapeDataString(key);
+        }
+
         static int ChatListCmd(bool json, string board)
         {
             var s = ChatSettings();
             string target, err;
             if (!ChatTarget(s, board, out target, out err)) { Out(err); return 2; }
             string raw;
-            try { raw = HttpJson(ChatBase(s) + "/api/c/list?board=" + target + "&since=0&limit=50", null); }
+            try { raw = HttpJson(ChatUrl(ChatBase(s) + "/api/c/list?board=" + target + "&since=0&limit=50", s, target), null); }
             catch (Exception e) { Out("ERR " + e.Message); return 1; }
             if (json) { Out(raw); return 0; }
             var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
@@ -1324,7 +1345,7 @@ namespace NexusBoard.Cli
             var payload = new Dictionary<string, object> { { "board", target }, { "from", "ai" }, { "text", text } };
             try
             {
-                string raw = HttpJson(ChatBase(s) + "/api/c/send", new JavaScriptSerializer().Serialize(payload));
+                string raw = HttpJson(ChatUrl(ChatBase(s) + "/api/c/send", s, target), new JavaScriptSerializer().Serialize(payload));
                 var o = new JavaScriptSerializer().DeserializeObject(raw) as Dictionary<string, object>;
                 bool ok = o != null && o.ContainsKey("ok") && Convert.ToBoolean(o["ok"]);
                 Out(ok ? "SENT" : "ERR " + raw);

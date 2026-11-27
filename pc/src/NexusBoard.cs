@@ -15,9 +15,9 @@ using System.Web.Script.Serialization;
 [assembly: System.Reflection.AssemblyTitle("Nexus Board")]
 [assembly: System.Reflection.AssemblyProduct("Nexus Board")]
 [assembly: System.Reflection.AssemblyCompany("Nexus x AutSquad")]
-[assembly: System.Reflection.AssemblyFileVersion("2.2.5")]
-[assembly: System.Reflection.AssemblyVersion("2.2.5")]
-[assembly: System.Reflection.AssemblyInformationalVersion("2.2.5")]
+[assembly: System.Reflection.AssemblyFileVersion("2.2.6")]
+[assembly: System.Reflection.AssemblyVersion("2.2.6")]
+[assembly: System.Reflection.AssemblyInformationalVersion("2.2.6")]
 
 namespace NexusBoard
 {
@@ -29,8 +29,8 @@ namespace NexusBoard
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
-        public const string Version = "2.2.5";
-        public const int VersionCode = 21;
+        public const string Version = "2.2.6";
+        public const int VersionCode = 22;
         public static bool OpenKeyOnStart = false;
         public const string UpdateArg = "/update";
 
