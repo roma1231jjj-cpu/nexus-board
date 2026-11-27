@@ -867,7 +867,9 @@ function boardUrlFor(req, host, trainHost) {
     const proto = isHttps(req) ? "https" : "http";
     base = proto + "://" + (host || HOST + ":" + PORT);
   }
-  return TOKEN ? base + "/?k=" + encodeURIComponent(TOKEN) : base + "/";
+  // Токен сайта в HTML не подставляем: страница уже авторизована cookie,
+  // а ссылка с ?k= утекала бы в DOM, историю и скриншоты.
+  return base + "/";
 }
 
 function sendFile(res, file, type) {
